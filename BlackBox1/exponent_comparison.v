@@ -11,4 +11,21 @@ module exponent_comparison (
 
 );
 
+    //----------------------------------------------------------
+    // Product exponent = A_exp + B_exp
+    //----------------------------------------------------------
+    wire [31:0] product_exp;
+
+    assign product_exp = A_exp + B_exp;
+
+    //----------------------------------------------------------
+    // Maximum exponent
+    //----------------------------------------------------------
+    assign MaxExp = (product_exp > C_exp) ? product_exp : C_exp;
+
+    //----------------------------------------------------------
+    // Exponent difference (used for shifting C)
+    //----------------------------------------------------------
+    assign ExpDiff = MaxExp - C_exp;
+
 endmodule
