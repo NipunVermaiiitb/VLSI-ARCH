@@ -17,8 +17,10 @@ module mult14_radix4_booth (
     output [27:0] p
 );
 
-    // Radix-4 Booth uses overlapping 3-bit groups from {b, 1'b0}.
-    wire [15:0] b_ext = {1'b0, b, 1'b0};
+    // Radix-4 Booth uses overlapping 3-bit groups from {2'b00, b, 1'b0}
+    // for unsigned operands. The extra leading zero makes the top group
+    // recode as +1 (not +2) when b is all ones.
+    wire [16:0] b_ext = {2'b00, b, 1'b0};
     wire [2:0] grp0 = b_ext[2:0];
     wire [2:0] grp1 = b_ext[4:2];
     wire [2:0] grp2 = b_ext[6:4];
@@ -26,7 +28,7 @@ module mult14_radix4_booth (
     wire [2:0] grp4 = b_ext[10:8];
     wire [2:0] grp5 = b_ext[12:10];
     wire [2:0] grp6 = b_ext[14:12];
-    wire [2:0] grp7 = b_ext[15:13];
+    wire [2:0] grp7 = b_ext[16:14];
 
     function [31:0] booth_term;
         input [2:0] code;

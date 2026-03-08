@@ -12,7 +12,6 @@ module Stage1_Module (
 
     // Control signals
     input  [2:0]       Prec,
-    input  [3:0]       Valid,
     input              Para,
     input              Cvt,
 
@@ -20,12 +19,14 @@ module Stage1_Module (
     // Outputs AFTER Pipeline Stage 1 Register
     //----------------------------------------------------------
 
-    // Multiplier partial products
-    output reg [111:0] partial_products,
+    // Multiplier carry-save outputs (paper-style)
+    output reg [111:0] partial_products_sum,
+    output reg [111:0] partial_products_carry,
 
     // Exponent comparison results
     output reg [31:0]  ExpDiff,
     output reg [31:0]  MaxExp,
+    output reg [63:0]  ProdASC,    // Product alignment shift counts for Stage 2
 
     // Aligned C output
     output reg [162:0] Aligned_C,
@@ -36,6 +37,9 @@ module Stage1_Module (
     //input pass
     output reg         Para_reg,
     output reg         Cvt_reg,
+    
+    // Pipeline valid signal (deterministic latency)
+    output reg         valid_out,
 
     // Mode signals
     output             PD_mode,
@@ -61,12 +65,33 @@ module Stage1_Module (
     assign PD4_mode = (Prec == HP)  || (Prec == BF16);
 
     //----------------------------------------------------------
-    // Stage 0 : Input Register
+    // Global Cycle Counter (for DP iteration)
+    //----------------------------------------------------------
+    // Toggles every cycle: 0 -> 1 -> 0 -> 1 ...
+    // Used to control 2-cycle DP multiplication
+    reg cnt;
+    
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            cnt <= 1'b0;
+        else
+            cnt <= ~cnt;
+    end
+
+    //----------------------------------------------------------
+    // Stage 0 : Input Register with DP Hold Logic
     //----------------------------------------------------------
     reg [63:0] A_reg, B_reg, C_reg;
     reg [2:0]  Prec_reg;
-    reg [3:0]  Valid_reg;
-    reg [31:0] Cnt;
+    reg        Para_reg_int, Cvt_reg_int;
+
+    // Auto-generate Valid from registered Prec (low-cost)
+    wire [3:0] Valid_reg;
+    assign Valid_reg = (Prec_reg == TF32) ? 4'b0101 : 4'b1111;
+
+    // For DP mode: accept new inputs only on cycle 0
+    // For other modes: accept every cycle
+    wire accept_inputs = (Prec == DP) ? (cnt == 1'b0) : 1'b1;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -74,21 +99,18 @@ module Stage1_Module (
             B_reg     <= 64'd0;
             C_reg     <= 64'd0;
             Prec_reg  <= 3'd0;
-            Valid_reg <= 4'd0;
-            Cnt       <= 32'd0;
-            Para_reg  <= 1'b0;
-            Cvt_reg   <= 1'b0;
+            Para_reg_int  <= 1'b0;
+            Cvt_reg_int   <= 1'b0;
         end
-        else begin
+        else if (accept_inputs) begin
             A_reg     <= A_in;
             B_reg     <= B_in;
             C_reg     <= C_in;
             Prec_reg  <= Prec;
-            Valid_reg <= Valid;
-            Cnt       <= Cnt + 32'd1;
-            Para_reg  <= Para;
-            Cvt_reg   <= Cvt;
+            Para_reg_int  <= Para;
+            Cvt_reg_int   <= Cvt;
         end
+        // else: hold previous values for DP cycle 1
     end
 
     //----------------------------------------------------------
@@ -112,6 +134,8 @@ module Stage1_Module (
         .B_in(B_reg),
         .C_in(C_reg),
         .Prec(Prec_reg),
+        .Valid(Valid_reg),
+        .Para(Para_reg_int),
 
         .A_sign(A_sign_raw),
         .B_sign(B_sign_raw),
@@ -130,8 +154,9 @@ module Stage1_Module (
     // Stage 1 Arithmetic Blocks (Combinational)
     //----------------------------------------------------------
 
-    // Multiplier Output
-    wire [111:0] partial_products_w;
+    // Multiplier carry-save outputs
+    wire [111:0] partial_products_sum_w;
+    wire [111:0] partial_products_carry_w;
 
     low_cost_multiplier_array u_multiplier (
         .clk(clk),
@@ -143,13 +168,15 @@ module Stage1_Module (
         .PD_mode(PD_mode),
         .PD2_mode(PD2_mode),
         .PD4_mode(PD4_mode),
-        .Cnt0(Cnt[0]),
-        .partial_products(partial_products_w)
+        .Cnt0(cnt),
+        .partial_sum(partial_products_sum_w),
+        .partial_carry(partial_products_carry_w)
     );
 
     // Exponent Comparison
     wire [31:0] ExpDiff_w;
     wire [31:0] MaxExp_w;
+    wire [63:0] ProdASC_w;
 
     exponent_comparison u_exp_compare (
         .A_exp(A_exp_ext),
@@ -157,10 +184,11 @@ module Stage1_Module (
         .C_exp(C_exp_ext),
         .Prec(Prec_reg),
         .Valid(Valid_reg),
-        .Para(Para_reg),
-        .Cvt(Cvt_reg),
+        .Para(Para_reg_int),
+        .Cvt(Cvt_reg_int),
         .ExpDiff(ExpDiff_w),
-        .MaxExp(MaxExp_w)
+        .MaxExp(MaxExp_w),
+        .ProdASC(ProdASC_w)
     );
 
     // Addend Alignment Shifter
@@ -170,6 +198,7 @@ module Stage1_Module (
         .C_mantissa(C_mant_ext),
         .ExpDiff(ExpDiff_w),
         .Prec(Prec_reg),
+        .Para(Para_reg_int),
         .Aligned_C(Aligned_C_w)
     );
 
@@ -188,18 +217,34 @@ module Stage1_Module (
     //----------------------------------------------------------
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            partial_products <= 112'd0;
+            partial_products_sum   <= 112'd0;
+            partial_products_carry <= 112'd0;
             ExpDiff          <= 32'd0;
             MaxExp           <= 32'd0;
+            ProdASC          <= 64'd0;
             Aligned_C        <= 163'd0;
             Sign_AB          <= 4'd0;
+            Para_reg         <= 1'b0;
+            Cvt_reg          <= 1'b0;
+            valid_out        <= 1'b0;
         end
         else begin
-            partial_products <= partial_products_w;
+            partial_products_sum   <= partial_products_sum_w;
+            partial_products_carry <= partial_products_carry_w;
             ExpDiff          <= ExpDiff_w;
             MaxExp           <= MaxExp_w;
+            ProdASC          <= ProdASC_w;
             Aligned_C        <= Aligned_C_w;
             Sign_AB          <= Sign_AB_w;
+            Para_reg         <= Para_reg_int;
+            Cvt_reg          <= Cvt_reg_int;
+            
+            // Valid output masking (deterministic latency)
+            // DP mode: output valid only on cycle 1 (when cnt==1, we output previous cycle's data)
+            // cycle 0 (cnt=0): processing, valid_out=0
+            // cycle 1 (cnt=1): results ready, valid_out=1
+            // Other modes: output valid every cycle
+            valid_out <= (Prec_reg == DP) ? ~cnt : 1'b1;
         end
     end
 

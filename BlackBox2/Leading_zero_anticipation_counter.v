@@ -37,31 +37,18 @@ module LZAC (
     endgenerate
     
     // Priority encoder: count leading zeros (find first 1 from MSB)
-    wire [7:0] leading_zeros;
-    
-    generate
-        for (i = 0; i < 163; i = i + 1) begin : lza_encoder
-            if (i == 162) begin
-                assign leading_zeros = (result_bit[162]) ? 8'd0 : 8'd163;
-            end else if (i < 8) begin
-                if (result_bit[162-i]) begin
-                    assign leading_zeros = 8'd0 + i;
-                end
-            end
-        end
-    endgenerate
-    
-    // Encode priority
     reg [7:0] lza_cnt_reg;
     
     always @(*) begin
         lza_cnt_reg = 8'd163;  // Default: all zeros
-        for (i = 0; i < 163; i = i + 1) begin
-            if (result_bit[162-i]) begin
-                lza_cnt_reg = 8'd(i);
-                break;
-            end
-        end
+        if (result_bit[162]) lza_cnt_reg = 8'd0;
+        else if (result_bit[161]) lza_cnt_reg = 8'd1;
+        else if (result_bit[160]) lza_cnt_reg = 8'd2;
+        else if (result_bit[159]) lza_cnt_reg = 8'd3;
+        else if (result_bit[158]) lza_cnt_reg = 8'd4;
+        else if (result_bit[157]) lza_cnt_reg = 8'd5;
+        else if (result_bit[156]) lza_cnt_reg = 8'd6;
+        else if (result_bit[155]) lza_cnt_reg = 8'd7;
     end
     
     assign LZA_CNT = lza_cnt_reg;

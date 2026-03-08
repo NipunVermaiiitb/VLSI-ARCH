@@ -56,7 +56,8 @@ always @(posedge clk or negedge rst_n) begin
         PD_mode_out <= 0;
 
     end else begin
-
+        // Unconditional capture (no pipeline stalls)
+        // Valid signal flows as metadata; Stage 3 decides to use data based on Valid_out
         Sum_out <= Sum_in;
         Carry_out <= Carry_in;
 

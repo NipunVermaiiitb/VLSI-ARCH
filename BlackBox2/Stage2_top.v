@@ -10,6 +10,7 @@ module Stage2_Top (
     input  [111:0] partial_products_s1,
     input  [31:0]  ExpDiff_s1,
     input  [31:0]  MaxExp_s1,
+    input  [63:0]  ProdASC_s1,
 
     input  [162:0] Aligned_C_s1,
 
@@ -30,69 +31,36 @@ module Stage2_Top (
     output [162:0] Carry_s2,
 
     output [162:0] Aligned_C_dual_s2,
-    output [162:0] Aligned_C_high_s2
+    output [162:0] Aligned_C_high_s2,
+
+    output [3:0]   Sign_AB_s2,
+
+    output [2:0]   Prec_s2,
+    output [3:0]   Valid_s2,
+
+    output         PD_mode_s2
 
 );
 
     //------------------------------------------------
-    // Stage-1 pipeline register outputs
+    // Direct wire assignments (Stage1_Module already has pipeline register)
     //------------------------------------------------
 
-    wire [111:0] partial_products;
-    wire [31:0]  ExpDiff;
-    wire [31:0]  MaxExp;
+    wire [111:0] partial_products = partial_products_s1;
+    wire [31:0]  ExpDiff          = ExpDiff_s1;
+    wire [31:0]  MaxExp           = MaxExp_s1;
+    wire [63:0]  ProdASC          = ProdASC_s1;
 
-    wire [162:0] Aligned_C;
+    wire [162:0] Aligned_C        = Aligned_C_s1;
 
-    wire [3:0]   Sign_AB;
+    wire [3:0]   Sign_AB          = Sign_AB_s1;
 
-    wire [2:0]   Prec;
-    wire [3:0]   Valid;
+    wire [2:0]   Prec             = Prec_s1;
+    wire [3:0]   Valid            = Valid_s1;
 
-    wire         PD_mode;
-    wire         PD2_mode;
-    wire         PD4_mode;
-
-    //------------------------------------------------
-    // Instantiate Stage-1 Pipeline Register
-    //------------------------------------------------
-
-    Stage1_Pipeline_Register u_stage1_reg (
-
-        .clk(clk),
-        .rst_n(rst_n),
-
-        .partial_products_in(partial_products_s1),
-        .ExpDiff_in(ExpDiff_s1),
-        .MaxExp_in(MaxExp_s1),
-
-        .Aligned_C_in(Aligned_C_s1),
-
-        .Sign_AB_in(Sign_AB_s1),
-
-        .Prec_in(Prec_s1),
-        .Valid_in(Valid_s1),
-
-        .PD_mode_in(PD_mode_s1),
-        .PD2_mode_in(PD2_mode_s1),
-        .PD4_mode_in(PD4_mode_s1),
-
-        .partial_products_out(partial_products),
-        .ExpDiff_out(ExpDiff),
-        .MaxExp_out(MaxExp),
-
-        .Aligned_C_out(Aligned_C),
-
-        .Sign_AB_out(Sign_AB),
-
-        .Prec_out(Prec),
-        .Valid_out(Valid),
-
-        .PD_mode_out(PD_mode),
-        .PD2_mode_out(PD2_mode),
-        .PD4_mode_out(PD4_mode)
-
-    );
+    wire         PD_mode          = PD_mode_s1;
+    wire         PD2_mode         = PD2_mode_s1;
+    wire         PD4_mode         = PD4_mode_s1;
 
     //------------------------------------------------
     // Stage 2 internal wires
@@ -138,8 +106,10 @@ module Stage2_Top (
         .product2(product2),
         .product3(product3),
 
-        .MaxExp(MaxExp),
-        .ExpDiff(ExpDiff),
+        .ProdASC(ProdASC),
+        .PD_mode(PD_mode),
+        .PD2_mode(PD2_mode),
+        .PD4_mode(PD4_mode),
 
         .aligned_p0(aligned_p0),
         .aligned_p1(aligned_p1),
@@ -149,15 +119,24 @@ module Stage2_Top (
     );
 
     //------------------------------------------------
+    // Apply signs to aligned products (two's complement inversion)
+    //------------------------------------------------
+
+    wire [162:0] signed_p0 = Sign_AB[0] ? (~aligned_p0 + 163'd1) : aligned_p0;
+    wire [162:0] signed_p1 = Sign_AB[1] ? (~aligned_p1 + 163'd1) : aligned_p1;
+    wire [162:0] signed_p2 = Sign_AB[2] ? (~aligned_p2 + 163'd1) : aligned_p2;
+    wire [162:0] signed_p3 = Sign_AB[3] ? (~aligned_p3 + 163'd1) : aligned_p3;
+
+    //------------------------------------------------
     // First CSA (4-to-2)
     //------------------------------------------------
 
     CSA_4to2 u_csa (
 
-        .in0(aligned_p0),
-        .in1(aligned_p1),
-        .in2(aligned_p2),
-        .in3(aligned_p3),
+        .in0(signed_p0),
+        .in1(signed_p1),
+        .in2(signed_p2),
+        .in3(signed_p3),
 
         .sum(Sum_s2),
         .carry(Carry_s2)
@@ -170,5 +149,14 @@ module Stage2_Top (
 
     assign Aligned_C_dual_s2 = Aligned_C;
     assign Aligned_C_high_s2 = Aligned_C;
+
+    //------------------------------------------------
+    // Forward control signals to Stage 3
+    //------------------------------------------------
+
+    assign Sign_AB_s2 = Sign_AB;
+    assign Prec_s2    = Prec;
+    assign Valid_s2   = Valid;
+    assign PD_mode_s2 = PD_mode;
 
 endmodule
