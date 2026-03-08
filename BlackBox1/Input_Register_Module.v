@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-module Input_Register_Module (
+module Stage1_Module (
 
     input              clk,
     input              rst_n,
@@ -66,6 +66,7 @@ module Input_Register_Module (
     reg [63:0] A_reg, B_reg, C_reg;
     reg [2:0]  Prec_reg;
     reg [3:0]  Valid_reg;
+    reg [31:0] Cnt;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -74,6 +75,7 @@ module Input_Register_Module (
             C_reg     <= 64'd0;
             Prec_reg  <= 3'd0;
             Valid_reg <= 4'd0;
+            Cnt       <= 32'd0;
             Para_reg  <= 1'b0;
             Cvt_reg   <= 1'b0;
         end
@@ -83,6 +85,7 @@ module Input_Register_Module (
             C_reg     <= C_in;
             Prec_reg  <= Prec;
             Valid_reg <= Valid;
+            Cnt       <= Cnt + 32'd1;
             Para_reg  <= Para;
             Cvt_reg   <= Cvt;
         end
@@ -99,9 +102,9 @@ module Input_Register_Module (
     wire [31:0] B_exp_ext;
     wire [31:0] C_exp_ext;
 
-    wire        A_sign_raw;
-    wire        B_sign_raw;
-    wire        C_sign_raw;
+    wire [3:0]  A_sign_raw;
+    wire [3:0]  B_sign_raw;
+    wire [3:0]  C_sign_raw;
 
     component_formatter u_component_formatter (
 
@@ -128,9 +131,11 @@ module Input_Register_Module (
     //----------------------------------------------------------
 
     // Multiplier Output
-    wire [111:0] partial_products;
+    wire [111:0] partial_products_w;
 
     low_cost_multiplier_array u_multiplier (
+        .clk(clk),
+        .rst_n(rst_n),
         .A_mantissa(A_mant_ext),
         .B_mantissa(B_mant_ext),
         .Prec(Prec_reg),
@@ -138,40 +143,64 @@ module Input_Register_Module (
         .PD_mode(PD_mode),
         .PD2_mode(PD2_mode),
         .PD4_mode(PD4_mode),
-        .partial_products(partial_products)
+        .Cnt0(Cnt[0]),
+        .partial_products(partial_products_w)
     );
 
     // Exponent Comparison
-    wire [31:0] ExpDiff;
-    wire [31:0] MaxExp;
+    wire [31:0] ExpDiff_w;
+    wire [31:0] MaxExp_w;
 
     exponent_comparison u_exp_compare (
         .A_exp(A_exp_ext),
         .B_exp(B_exp_ext),
         .C_exp(C_exp_ext),
         .Prec(Prec_reg),
-        .ExpDiff(ExpDiff),
-        .MaxExp(MaxExp)
+        .Valid(Valid_reg),
+        .Para(Para_reg),
+        .Cvt(Cvt_reg),
+        .ExpDiff(ExpDiff_w),
+        .MaxExp(MaxExp_w)
     );
 
     // Addend Alignment Shifter
-    wire [162:0] Aligned_C;
+    wire [162:0] Aligned_C_w;
 
     addend_alignment_shifter u_align (
         .C_mantissa(C_mant_ext),
-        .ExpDiff(ExpDiff),
+        .ExpDiff(ExpDiff_w),
         .Prec(Prec_reg),
-        .Aligned_C(Aligned_C)
+        .Aligned_C(Aligned_C_w)
     );
 
     // Sign Logic
-    wire [3:0] Sign_AB;
+    wire [3:0] Sign_AB_w;
 
     sign_logic u_sign_logic (
         .A_sign(A_sign_raw),
         .B_sign(B_sign_raw),
         .Valid(Valid_reg),
-        .Sign_AB(Sign_AB)
+        .Sign_AB(Sign_AB_w)
     );
+
+    //----------------------------------------------------------
+    // Stage 1 Pipeline Register
+    //----------------------------------------------------------
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            partial_products <= 112'd0;
+            ExpDiff          <= 32'd0;
+            MaxExp           <= 32'd0;
+            Aligned_C        <= 163'd0;
+            Sign_AB          <= 4'd0;
+        end
+        else begin
+            partial_products <= partial_products_w;
+            ExpDiff          <= ExpDiff_w;
+            MaxExp           <= MaxExp_w;
+            Aligned_C        <= Aligned_C_w;
+            Sign_AB          <= Sign_AB_w;
+        end
+    end
 
 endmodule

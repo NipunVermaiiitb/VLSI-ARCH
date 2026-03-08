@@ -9,22 +9,55 @@ module addend_alignment_shifter (
 );
 
     //----------------------------------------------------------
-    // Extend mantissa to CSA datapath width
+    // Precision encoding
     //----------------------------------------------------------
-    wire [162:0] extended_C;
-
-    assign extended_C = {C_mantissa, 107'b0};
-
-    //----------------------------------------------------------
-    // Shift amount (limit to datapath width)
-    //----------------------------------------------------------
-    wire [7:0] shift_amt;
-
-    assign shift_amt = (ExpDiff > 8'd162) ? 8'd162 : ExpDiff[7:0];
+    parameter HP    = 3'b000;
+    parameter BF16  = 3'b001;
+    parameter TF32  = 3'b010;
+    parameter SP    = 3'b011;
+    parameter DP    = 3'b100;
 
     //----------------------------------------------------------
-    // Right shift alignment
+    // ExpDiff packs two Stage1 ASCs: {ASC_C1, ASC_C0}
     //----------------------------------------------------------
-    assign Aligned_C = extended_C >> shift_amt;
+    wire [15:0] asc_c1_raw = ExpDiff[31:16];
+    wire [15:0] asc_c0_raw = ExpDiff[15:0];
+
+    wire [7:0] asc_c1 = (asc_c1_raw > 16'd162) ? 8'd162 : asc_c1_raw[7:0];
+    wire [7:0] asc_c0 = (asc_c0_raw > 16'd162) ? 8'd162 : asc_c0_raw[7:0];
+
+    //----------------------------------------------------------
+    // Unified C placement (Stage1): ManC is pre-placed left of
+    // product domain, then two parallel shifters align C1/C0.
+    //----------------------------------------------------------
+    wire [162:0] man_c_unified;
+    wire [81:0]  man_c_hi;
+    wire [80:0]  man_c_lo;
+    wire [81:0]  data_pad;
+
+    // Keep C on the high side so right-shift aligns down into product region.
+    assign man_c_unified = {C_mantissa, 107'd0};
+    assign man_c_hi      = man_c_unified[162:81];
+    assign man_c_lo      = man_c_unified[80:0];
+
+    // From paper flow: DP path can reuse high part as datapad for C0 path.
+    assign data_pad = (Prec == DP) ? man_c_hi : 82'd0;
+
+    //----------------------------------------------------------
+    // Dual alignment shifters controlled by ASC_C1 / ASC_C0
+    //----------------------------------------------------------
+    wire [162:0] sht_rc1;
+    wire [162:0] sht_rc0;
+
+    assign sht_rc1 = ({81'd0, man_c_hi})  >> asc_c1;
+    assign sht_rc0 = ({data_pad, man_c_lo}) >> asc_c0;
+
+    //----------------------------------------------------------
+    // Merge two aligned paths into one 163-bit addend vector
+    //----------------------------------------------------------
+    assign Aligned_C = {sht_rc1[162:81], sht_rc0[80:0]};
+
+    // Note: sticky generation from shifted-out bits can be added later
+    // by exposing dropped-bit ORs from each shifter level/path.
 
 endmodule

@@ -7,4 +7,6 @@ module Final_Adder (
 
 );
 
+assign SUM = A + B;
+
 endmodule
