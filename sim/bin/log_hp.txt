@@ -1,0 +1,20 @@
+--- HP 1.0x1.0+0 (expect 0x3C003C003C003C00) ---
+  cyc0: pp[27:0]=0100000 valid_s1=1 S2sum[162:130]=004000000 lza=163 maxexp=fff3 result=0000000000000000 valid=0000
+  cyc1: pp[27:0]=0100000 valid_s1=1 S2sum[162:130]=004000000 lza=163 maxexp=03ff result=0000000000000000 valid=1111
+  cyc2: pp[27:0]=0100000 valid_s1=1 S2sum[162:130]=004000000 lza=  6 maxexp=03ff result=0800080008000800 valid=1111
+  cyc3: pp[27:0]=0100000 valid_s1=1 S2sum[162:130]=004000000 lza=  6 maxexp=000f result=7c007c007c007c00 valid=1111
+  cyc4: pp[27:0]=0100000 valid_s1=1 S2sum[162:130]=004000000 lza=  6 maxexp=000f result=3c003c003c003c00 valid=1111
+  cyc5: pp[27:0]=0100000 valid_s1=1 S2sum[162:130]=004000000 lza=  6 maxexp=000f result=3c003c003c003c00 valid=1111
+  cyc6: pp[27:0]=0100000 valid_s1=1 S2sum[162:130]=004000000 lza=  6 maxexp=000f result=3c003c003c003c00 valid=1111
+  cyc7: pp[27:0]=0100000 valid_s1=1 S2sum[162:130]=004000000 lza=  6 maxexp=000f result=3c003c003c003c00 valid=1111
+
+--- BF16 1.0x1.0+0 (expect 0x3F803F803F803F80) ---
+  cyc0: pp[27:0]=0004000 valid_s1=1 lza=  6 maxexp=fff3 result=0000000000000000 valid=1111
+  cyc1: pp[27:0]=0004000 valid_s1=1 lza=  6 maxexp=000f result=0000000000000000 valid=1111
+  cyc2: pp[27:0]=0004000 valid_s1=1 lza= 12 maxexp=000f result=0780078007800780 valid=1111
+  cyc3: pp[27:0]=0004000 valid_s1=1 lza= 12 maxexp=007f result=0480048004800480 valid=1111
+  cyc4: pp[27:0]=0004000 valid_s1=1 lza= 12 maxexp=007f result=3c803c803c803c80 valid=1111
+  cyc5: pp[27:0]=0004000 valid_s1=1 lza= 12 maxexp=007f result=3c803c803c803c80 valid=1111
+  cyc6: pp[27:0]=0004000 valid_s1=1 lza= 12 maxexp=007f result=3c803c803c803c80 valid=1111
+  cyc7: pp[27:0]=0004000 valid_s1=1 lza= 12 maxexp=007f result=3c803c803c803c80 valid=1111
+sim\testbenches\tb_hp_debug.v:62: $finish called at 276000 (1ps)

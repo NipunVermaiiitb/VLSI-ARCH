@@ -1,0 +1,37 @@
+===================================================
+Stage 3 Unit Testbench
+===================================================
+
+--- TC-S3-1: Zero Inputs ---
+  Add_Rslt_s3=00000000000000000000000000000000000000000  LZA_CNT=163  sign=0
+  PASS [Zerÿÿÿ’Zero]
+  PASS [Zÿÿÿâÿ’NoSign]
+  TC-S3-1: PASS
+
+--- TC-S3-2: Positive product at bit[106], no addend ---
+  Add_Rslt[107:104]=0110  LZA_CNT= 56  sign=0
+  PASS [PosSign]
+  PASS [BitPreserved]
+  TC-S3-2: PASS
+
+--- TC-S3-3: CPA MSB=1 â†’ Complementer+INC negation ---
+  Result_sign = 1 (expect 1 = negative, since CPA MSB=1)
+  PASS [NegSign]
+  TC-S3-3: PASS
+
+--- TC-S3-4: Product + Addend CSA merge ---
+  Add_Rslt[108:102]=0010100  sign=0
+  PASS [AccumNonZero]
+  PASS [AccumBit106]
+  TC-S3-4: PASS
+
+--- TC-S3-5: Prec/Valid passthrough ---
+  Prec_s3=011 (expect SP=011)  Valid_s3=1111 (expect 1111)
+  PASS [PrecPass]
+  PASS [ValidPass]
+  TC-S3-5: PASS
+
+===================================================
+Stage 3 Tests: ALL PASSED (5/5)
+===================================================
+sim\testbenches\tb_stage3_top.v:212: $finish called at 215000 (1ps)

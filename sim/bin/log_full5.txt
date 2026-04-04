@@ -1,0 +1,62 @@
+===================================================
+DPDAC Full Pipeline Integration Testbench
+===================================================
+
+--- TC-DPDAC-1: DP 1.5*2.0+0.5 = 3.5 ---
+  Result_out   = 0x400c000000000000
+  Expected     = 0x400c000000000000
+  Sign_out     = 0 (expect 0)
+  Valid_out    = 0001
+  PASS [DP_3.5]
+  PASS [DP_PosSign]
+  TC-DPDAC-1: PASS
+
+--- TC-DPDAC-2: DP -1.5*2.0+0.0 = -3.0 ---
+  Result_out   = 0xc008000000000000
+  Expected     = 0xc008000000000000
+  Sign_out     = 1 (expect 1)
+  PASS [DP_neg3.0]
+  PASS [DP_NegSign]
+  TC-DPDAC-2: PASS
+
+--- TC-DPDAC-3: DP 0.0*2.0+0.0 = 0.0 ---
+  Result_out   = 0x0000000000000000 (expect 0)
+  PASS [DP_zero]
+  TC-DPDAC-3: PASS
+
+--- TC-DPDAC-4: SP dual-lane structural check ---
+  Result_out   = 0x0306000003060000
+  Valid_out    = 0101 (expect 0101)
+  Sign_out     = 0 (expect 0)
+  PASS [SP_nonzero]
+  PASS [SP_valid]
+  PASS [SP_sign]
+  TC-DPDAC-4: PASS
+
+--- TC-DPDAC-5: HP quad-lane 1.0*1.0+0 structural check ---
+  Result_out   = 0x0000000000000000
+  Valid_out    = 1111 (expect 1111)
+  FAIL [HP_nonzero]: HP product should be non-zero
+  PASS [HP_valid]
+  PASS [HP_positive]
+  TC-DPDAC-5: FAIL
+
+--- TC-DPDAC-6: BF16 quad-lane 1.0*1.0+0 structural check ---
+  Result_out   = 0x0480048004800480
+  Valid_out    = 1111 (expect 1111)
+  PASS [BF16_nonzero]
+  PASS [BF16_valid]
+  TC-DPDAC-6: PASS
+
+--- TC-DPDAC-7: Back-to-back DP operations ---
+  Op1 Result = 0x4014000000000000 (expect 0x400c000000000000)
+  FAIL [BB_op1]: Op1 should be 3.5
+  Op2 Result = 0x4010000000000000 (expect 0x4010000000000000 = 4.0)
+  PASS [BB_op2]
+  TC-DPDAC-7: FAIL
+
+===================================================
+Full Pipeline Results:
+  FAILED: 2 errors
+===================================================
+sim\testbenches\tb_DPDAC_top.v:266: $finish called at 585000 (1ps)

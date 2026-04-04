@@ -1,0 +1,12 @@
+After SP (TC-4): result=4206000042060000 valid=0101
+
+Applied HP inputs. Watching pipeline...
+  HP cyc0: valid_s1=1 pp_s1[27:0]=0000000 S2sum[162:130]=001000000 S2reg[162:130]=001000000 S3add[162:130]=010c00001 lza=  4 maxexp_s2=0080 maxexp_s4=0080 result=4206000042060000 valid=0101
+  HP cyc1: valid_s1=1 pp_s1[27:0]=0100000 S2sum[162:130]=004000000 S2reg[162:130]=001000000 S3add[162:130]=011800001 lza=  4 maxexp_s2=0080 maxexp_s4=0080 result=4206000042060000 valid=0101
+  HP cyc2: valid_s1=1 pp_s1[27:0]=0100000 S2sum[162:130]=004000000 S2reg[162:130]=004000000 S3add[162:130]=011800001 lza=  4 maxexp_s2=000f maxexp_s4=0080 result=0860086008600860 valid=1111
+  HP cyc3: valid_s1=1 pp_s1[27:0]=0100000 S2sum[162:130]=004000000 S2reg[162:130]=004000000 S3add[162:130]=004002000 lza=  6 maxexp_s2=000f maxexp_s4=0080 result=0860086008600860 valid=1111
+  HP cyc4: valid_s1=1 pp_s1[27:0]=0100000 S2sum[162:130]=004000000 S2reg[162:130]=004000000 S3add[162:130]=004002000 lza=  6 maxexp_s2=000f maxexp_s4=000f result=0000000000000000 valid=1111
+  HP cyc5: valid_s1=1 pp_s1[27:0]=0100000 S2sum[162:130]=004000000 S2reg[162:130]=004000000 S3add[162:130]=004002000 lza=  6 maxexp_s2=000f maxexp_s4=000f result=3c003c003c003c00 valid=1111
+  HP cyc6: valid_s1=1 pp_s1[27:0]=0100000 S2sum[162:130]=004000000 S2reg[162:130]=004000000 S3add[162:130]=004002000 lza=  6 maxexp_s2=000f maxexp_s4=000f result=3c003c003c003c00 valid=1111
+  HP cyc7: valid_s1=1 pp_s1[27:0]=0100000 S2sum[162:130]=004000000 S2reg[162:130]=004000000 S3add[162:130]=004002000 lza=  6 maxexp_s2=000f maxexp_s4=000f result=3c003c003c003c00 valid=1111
+sim\testbenches\tb_hp_debug.v:54: $finish called at 186000 (1ps)

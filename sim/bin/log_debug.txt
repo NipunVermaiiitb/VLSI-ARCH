@@ -1,0 +1,39 @@
+=== DEBUG: DP 1.5 * 2.0 + 0.5 pipeline trace ===
+t=66000 Result=0000000000000000 Valid=0001 Sign=0
+t=76000 Result=0000000000000000 Valid=0001 Sign=0
+t=86000 Result=0000000000000000 Valid=0001 Sign=0
+t=96000 Result=0000000000000000 Valid=0001 Sign=0
+t=106000 Result=3fd0000000000000 Valid=0001 Sign=0
+t=116000 Result=3fd0000000000000 Valid=0001 Sign=0
+t=126000 Result=3fd0000000000000 Valid=0001 Sign=0
+t=136000 Result=3fd0000000000000 Valid=0001 Sign=0
+t=146000 Result=3fd0000000000000 Valid=0001 Sign=0
+t=156000 Result=3fd0000000000000 Valid=0001 Sign=0
+=== DEBUG: Stage 1 hierarchy ===
+  S1 valid_out       = 1
+  S1 MaxExp          = 03fe0400
+  S1 partial_sum     = 0000000000000000000000000000
+  S1 pp_sum_s1[111:96] = 0000
+  S1 pp_carry[111:96]  = 0000
+
+=== DEBUG: Stage 2 hierarchy ===
+  S2 Sum[162:107]    = 00000000000000
+  S2 Sum[106:53]     = 00000000000000
+  S2 Carry[106:53]   = 00000000000000
+
+=== DEBUG: Stage 3 hierarchy ===
+  S3 Add_Rslt[162:107] = 10000000000000
+  S3 Add_Rslt[106:53]  = 00000000000000
+  S3 LZA_CNT           =   3
+  S3 Result_sign       = 0
+
+=== DEBUG: DPDAC_top MaxExp pipeline ===
+  MaxExp_s1 = 03fe0400
+  MaxExp_s2 = 03fe0400
+  MaxExp_s3 = 03fe0400
+  MaxExp_s4 = 03fe0400
+
+=== Final result ===
+  Result_out  = 3fd0000000000000
+  Expected    = 400c000000000000 (3.5)
+sim\testbenches\tb_DPDAC_top_debug.v:87: $finish called at 156000 (1ps)

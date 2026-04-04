@@ -1,0 +1,33 @@
+=== Per-cycle pipeline trace: DP 1.5*2.0+0.5 ===
+Cycle | pp_sum_nonzero | S3_Add_Rslt[162:107] | S3_LZA | Result
+    0 | pp_sum=01800000 | s3=00000000 | lza=163 | result=0000000000000000
+    1 | pp_sum=00000000 | s3=00000000 | lza=163 | result=0000000000000000
+    2 | pp_sum=03000000 | s3=10000000 | lza=  3 | result=0000000000000000
+    3 | pp_sum=00000000 | s3=10000000 | lza=  3 | result=0000000000000000
+    4 | pp_sum=03000000 | s3=10000000 | lza=  3 | result=3ff0000000000000
+    5 | pp_sum=00000000 | s3=10000000 | lza=  3 | result=3ff0000000000000
+    6 | pp_sum=03000000 | s3=10000000 | lza=  3 | result=3ff0000000000000
+    7 | pp_sum=00000000 | s3=10000000 | lza=  3 | result=3ff0000000000000
+    8 | pp_sum=03000000 | s3=10000000 | lza=  3 | result=3ff0000000000000
+    9 | pp_sum=00000000 | s3=10000000 | lza=  3 | result=3ff0000000000000
+
+=== Stage2 → Stage3 registered transfer ===
+  S3top.u_stage2_reg.Sum_out[162:131]   = 00000000
+  S3top.u_stage2_reg.Carry_out[162:131] = 00000000
+  S3top.u_stage2_reg.Aligned_C_dual[162:131] = 10000000
+
+=== Stage2_Top combinational outputs ===
+  Stage2.Sum_s2[162:131]   = 00000000
+  Stage2.Carry_s2[162:131] = 00000000
+  Stage2.Sum_s2[106:75]    = 00000000
+  Stage2.Carry_s2[106:75]  = 00000000
+  partial_products_s1[111:80] = 00000000
+  partial_products_s1[107:76] = 00000000
+  partial_products_s1[55:24]  = 00000000
+  pp_sum_s1[111:80]           = 00000000
+  pp_sum_s1[107:76]           = 00000000
+  pp_carry_s1[111:80]         = 00000000
+
+=== MaxExp ===
+  MaxExp_s4 = 03fe0400 (expect 0x03fe0400)
+sim\testbenches\tb_DPDAC_top_debug.v:84: $finish called at 156000 (1ps)
