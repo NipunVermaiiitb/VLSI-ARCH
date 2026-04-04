@@ -254,19 +254,21 @@ module tb_DPDAC_top;
         A_in = DP_1P5; B_in = DP_2P0; C_in = DP_0P5;
         Prec = DP; Para = 0; Cvt = 0;
         @(posedge clk);           // posedge: accept_inputs=1 (cnt=0), latch Op1
-        @(posedge clk);           // posedge: cnt=1, valid_s1=1 (Op1 product ready)
+        @(posedge clk); #1;       // posedge: cnt=1, valid_s1=1 (Op1 product ready)
         // Op2 inputs (start inserting Op2 while Op1 is in stages 2-4)
+        // #1 ensures the assignment comes strictly AFTER the posedge clock edge
         A_in = DP_2P0; B_in = DP_2P0; C_in = DP_0P0;
-        // Wait DP_LATENCY=6 for Op1 output (it takes 4 more pipe stages)
+        // Wait DP_LATENCY-2=4 more posedges for Op1 to reach output
         repeat(DP_LATENCY-2) @(posedge clk); #1;
         $display("  Op1 Result = 0x%016h (expect 0x%016h)", Result_out, DP_3P5);
         check("BB_op1", (Result_out === DP_3P5), "Op1 should be 3.5");
-        // Wait 2 more for Op2
-        @(posedge clk); @(posedge clk); @(posedge clk); #1;
+        // Wait 4 more for Op2 (Op2 exits pipeline 4 cycles after Op1)
+        @(posedge clk); @(posedge clk); @(posedge clk); @(posedge clk); #1;
         $display("  Op2 Result = 0x%016h (expect 0x4010000000000000 = 4.0)", Result_out);
         check("BB_op2", (Result_out === 64'h4010000000000000), "Op2 should be 4.0");
         if (errors == tc_errors) $display("  TC-DPDAC-7: PASS");
         else                     $display("  TC-DPDAC-7: FAIL");
+
 
         // ----------------------------------------------------------
         // Summary
