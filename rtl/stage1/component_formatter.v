@@ -7,7 +7,7 @@ module component_formatter (
     input  [63:0] C_in,
     input  [2:0]  Prec,
     input  [3:0]  Valid,
-    input         Para,     // NEW: Parallel addend mode (C split into two 32-bit addends)
+    input         Para,     // Parallel addend mode (C split into two 32-bit addends)
 
     // Extracted sign outputs
     output  [3:0]      A_sign,
@@ -144,10 +144,9 @@ module component_formatter (
                                    (en_seg2 ? {3'b000, (|B_in[46:42]), B_in[41:32]} : 14'd0),
                                    (en_seg1 ? {3'b000, (|B_in[30:26]), B_in[25:16]} : 14'd0),
                                    (en_seg0 ? {3'b000, (|B_in[14:10]), B_in[9:0]}   : 14'd0) };
-                    C_mant_ext = { (en_seg3 ? {3'b000, (|C_in[62:58]), C_in[57:48]} : 14'd0),
-                                   (en_seg2 ? {3'b000, (|C_in[46:42]), C_in[41:32]} : 14'd0),
-                                   (en_seg1 ? {3'b000, (|C_in[30:26]), C_in[25:16]} : 14'd0),
-                                   (en_seg0 ? {3'b000, (|C_in[14:10]), C_in[9:0]}   : 14'd0) };
+                    // C is always SP format in HP mode (products accumulate into SP)
+                    C_mant_ext = { (en_top28 ? {4'b0000, (|C_in[62:55]), C_in[54:32]} : 28'd0),
+                                   (en_bot28 ? {4'b0000, (|C_in[30:23]), C_in[22:0]}  : 28'd0) };
                 end
             end
 
@@ -157,15 +156,14 @@ module component_formatter (
                     A_mant_ext = { (en_seg3 ? {6'b000000, (|A_in[62:55]), A_in[54:48]} : 14'd0),
                                    (en_seg2 ? {6'b000000, (|A_in[46:39]), A_in[38:32]} : 14'd0),
                                    (en_seg1 ? {6'b000000, (|A_in[30:23]), A_in[22:16]} : 14'd0),
-                                   (en_seg0 ? {6'b000000, (|A_in[14:7]), A_in[6:0]}   : 14'd0) };
+                                   (en_seg0 ? {6'b000000, (|A_in[14:7]),  A_in[6:0]}   : 14'd0) };
                     B_mant_ext = { (en_seg3 ? {6'b000000, (|B_in[62:55]), B_in[54:48]} : 14'd0),
                                    (en_seg2 ? {6'b000000, (|B_in[46:39]), B_in[38:32]} : 14'd0),
                                    (en_seg1 ? {6'b000000, (|B_in[30:23]), B_in[22:16]} : 14'd0),
-                                   (en_seg0 ? {6'b000000, (|B_in[14:7]), B_in[6:0]}   : 14'd0) };
-                    C_mant_ext = { (en_seg3 ? {6'b000000, (|C_in[62:55]), C_in[54:48]} : 14'd0),
-                                   (en_seg2 ? {6'b000000, (|C_in[46:39]), C_in[38:32]} : 14'd0),
-                                   (en_seg1 ? {6'b000000, (|C_in[30:23]), C_in[22:16]} : 14'd0),
-                                   (en_seg0 ? {6'b000000, (|C_in[14:7]), C_in[6:0]}   : 14'd0) };
+                                   (en_seg0 ? {6'b000000, (|B_in[14:7]),  B_in[6:0]}   : 14'd0) };
+                    // C is always SP format in BF16 mode (products accumulate into SP)
+                    C_mant_ext = { (en_top28 ? {4'b0000, (|C_in[62:55]), C_in[54:32]} : 28'd0),
+                                   (en_bot28 ? {4'b0000, (|C_in[30:23]), C_in[22:0]}  : 28'd0) };
                 end
             end
 
@@ -236,10 +234,9 @@ module component_formatter (
                               (en_seg2 ? {3'b000, B_in[46:42]} : 8'd0),
                               (en_seg1 ? {3'b000, B_in[30:26]} : 8'd0),
                               (en_seg0 ? {3'b000, B_in[14:10]} : 8'd0) };
-                C_exp_ext = { (en_seg3 ? {3'b000, C_in[62:58]} : 8'd0),
-                              (en_seg2 ? {3'b000, C_in[46:42]} : 8'd0),
-                              (en_seg1 ? {3'b000, C_in[30:26]} : 8'd0),
-                              (en_seg0 ? {3'b000, C_in[14:10]} : 8'd0) };
+                // C is SP format: two 8-bit SP exponents at [62:55] and [30:23]
+                C_exp_ext = { (en_top28 ? C_in[62:55] : 8'd0), 8'd0,
+                              (en_bot28 ? C_in[30:23] : 8'd0), 8'd0 };
             end
 
             BF16: begin
@@ -251,10 +248,9 @@ module component_formatter (
                               (en_seg2 ? B_in[46:39] : 8'd0),
                               (en_seg1 ? B_in[30:23] : 8'd0),
                               (en_seg0 ? B_in[14:7]  : 8'd0) };
-                C_exp_ext = { (en_seg3 ? C_in[62:55] : 8'd0),
-                              (en_seg2 ? C_in[46:39] : 8'd0),
-                              (en_seg1 ? C_in[30:23] : 8'd0),
-                              (en_seg0 ? C_in[14:7]  : 8'd0) };
+                // C is SP format: two 8-bit SP exponents at [62:55] and [30:23]
+                C_exp_ext = { (en_top28 ? C_in[62:55] : 8'd0), 8'd0,
+                              (en_bot28 ? C_in[30:23] : 8'd0), 8'd0 };
             end
 
             default: ;

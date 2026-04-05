@@ -19,7 +19,7 @@ module Stage1_Module (
     // Outputs AFTER Pipeline Stage 1 Register
     //----------------------------------------------------------
 
-    // Multiplier carry-save outputs (paper-style)
+    // Multiplier carry-save outputs 
     output reg [111:0] partial_products_sum,
     output reg [111:0] partial_products_carry,
 

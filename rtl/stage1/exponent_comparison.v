@@ -139,10 +139,9 @@ module exponent_comparison (
                 B_e1 = unpack_exp_unbiased({6'd0, B_exp[12:8]},  BIAS_HP);
                 B_e0 = unpack_exp_unbiased({6'd0, B_exp[4:0]},   BIAS_HP);
 
-                C_e3 = unpack_exp_unbiased({6'd0, C_exp[28:24]}, BIAS_HP);
-                C_e2 = unpack_exp_unbiased({6'd0, C_exp[20:16]}, BIAS_HP);
-                C_e1 = unpack_exp_unbiased({6'd0, C_exp[12:8]},  BIAS_HP);
-                C_e0 = unpack_exp_unbiased({6'd0, C_exp[4:0]},   BIAS_HP);
+                // C is always SP format in HP mode (M=1 or 2 SP addends)
+                C_e3 = unpack_exp_unbiased({3'd0, C_exp[31:24]}, BIAS_SP);
+                C_e1 = unpack_exp_unbiased({3'd0, C_exp[15:8]},  BIAS_SP);
             end
 
             BF16: begin
@@ -156,10 +155,9 @@ module exponent_comparison (
                 B_e1 = unpack_exp_unbiased({3'd0, B_exp[15:8]},  BIAS_BF16);
                 B_e0 = unpack_exp_unbiased({3'd0, B_exp[7:0]},   BIAS_BF16);
 
-                C_e3 = unpack_exp_unbiased({3'd0, C_exp[31:24]}, BIAS_BF16);
-                C_e2 = unpack_exp_unbiased({3'd0, C_exp[23:16]}, BIAS_BF16);
-                C_e1 = unpack_exp_unbiased({3'd0, C_exp[15:8]},  BIAS_BF16);
-                C_e0 = unpack_exp_unbiased({3'd0, C_exp[7:0]},   BIAS_BF16);
+                // C is always SP format in BF16 mode (M=1 or 2 SP addends)
+                C_e3 = unpack_exp_unbiased({3'd0, C_exp[31:24]}, BIAS_SP);
+                C_e1 = unpack_exp_unbiased({3'd0, C_exp[15:8]},  BIAS_SP);
             end
 
             default: ;
@@ -223,14 +221,15 @@ module exponent_comparison (
                 if (en1 && (AB_e1 > exp_ab_max)) exp_ab_max = AB_e1;
                 if (en0 && (AB_e0 > exp_ab_max)) exp_ab_max = AB_e0;
 
-                // Stage1 addend alignment uses two C paths; group lanes into high/low halves.
-                exp_c1 = ((en3 ? C_e3 : -14'sd8192) > (en2 ? C_e2 : -14'sd8192)) ? (en3 ? C_e3 : -14'sd8192) : (en2 ? C_e2 : -14'sd8192);
-                exp_c0 = ((en1 ? C_e1 : -14'sd8192) > (en0 ? C_e0 : -14'sd8192)) ? (en1 ? C_e1 : -14'sd8192) : (en0 ? C_e0 : -14'sd8192);
+                // C is SP format: two SP addend lanes mapped to high (C_e3) and low (C_e1).
+                // C_e2 and C_e0 are unused (left at 0 default) — do NOT include them.
+                exp_c1 = en_top28 ? C_e3 : -14'sd8192;
+                exp_c0 = en_bot28 ? C_e1 : -14'sd8192;
                 exp_c_max = (exp_c1 > exp_c0) ? exp_c1 : exp_c0;
 
                 const_term = CONST_PD4_BASE + $signed({13'd0, Cvt});
                 bias_ab_dbg = (Prec == HP) ? BIAS_HP : BIAS_BF16;
-                bias_c_dbg  = (Prec == HP) ? BIAS_HP : BIAS_BF16;
+                bias_c_dbg  = BIAS_SP; // C is always SP in HP/BF16 modes
             end
 
             default: ;

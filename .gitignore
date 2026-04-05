@@ -7,6 +7,9 @@
 *.bak
 *~
 
+#Issues
+Issues.txt
+
 # Compilation Directories
 simv
 simv.daidir/

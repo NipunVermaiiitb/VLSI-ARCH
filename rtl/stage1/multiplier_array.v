@@ -122,7 +122,7 @@ module low_cost_multiplier_array (
     wire [55:0] pp0_blk0, pp1_blk0, pp2_blk0, pp3_blk0;
     multiplier_array_block u_block0 (
         .A_in(A0),
-        .B_in(B0),
+        .B_in(PD_mode & ~Cnt0 ? B1 : B0),
         .Valid({en1, en0, en1, en0}),
         .PP0(pp0_blk0),
         .PP1(pp1_blk0),
@@ -136,7 +136,7 @@ module low_cost_multiplier_array (
     wire [55:0] pp0_blk1, pp1_blk1, pp2_blk1, pp3_blk1;
     multiplier_array_block u_block1 (
         .A_in(A1),
-        .B_in(B1),
+        .B_in(PD_mode & ~Cnt0 ? B0 : B1),
         .Valid({en3, en2, en3, en2}),
         .PP0(pp0_blk1),
         .PP1(pp1_blk1),
@@ -187,33 +187,28 @@ module low_cost_multiplier_array (
     // DP cycle 1: Merge path with 56-bit partial CSA
     //----------------------------------------------------------
     // Split into high/low halves for intermediate compression
-    wire [55:0] sum_hi, carry_hi, sum_lo, carry_lo;
-    csa4_2 #(.W(56)) u_csa56_hi (
+    wire [55:0] sum_prev, carry_prev;
+    csa4_2 #(.W(56)) u_csa56_prev (
         .x(reg_sum0_dp[111:56]),
         .y(reg_carry0_dp[111:56]),
-        .z(gsum0[111:56]),
-        .w(56'd0),
-        .sum(sum_hi),
-        .carry(carry_hi)
+        .z(reg_sum0_dp[55:0]),
+        .w(reg_carry0_dp[55:0]),
+        .sum(sum_prev),
+        .carry(carry_prev)
     );
 
-    csa4_2 #(.W(56)) u_csa56_lo (
-        .x(reg_sum0_dp[55:0]),
-        .y(reg_carry0_dp[55:0]),
-        .z(gsum0[55:0]),
-        .w(56'd0),
-        .sum(sum_lo),
-        .carry(carry_lo)
-    );
+    // Proper alignment of the partial products
+    wire [111:0] sum_prev_aligned   = {28'd0, sum_prev, 28'd0};
+    wire [111:0] carry_prev_aligned = {28'd0, carry_prev, 28'd0};
 
-    // Final 112-bit compression on merged data
-    wire [111:0] merged_data = {sum_hi + carry_hi, sum_lo + carry_lo};
+
+    // Final 112-bit addition of aligned data
     wire [111:0] gsum1, gcarry1;
     csa4_2 #(.W(112)) u_csa112_stage2 (
-        .x(merged_data),
-        .y(112'd0),
-        .z(112'd0),
-        .w(112'd0),
+        .x(sum_prev_aligned),
+        .y(carry_prev_aligned),
+        .z(gcarry0),
+        .w(gsum0),
         .sum(gsum1),
         .carry(gcarry1)
     );
