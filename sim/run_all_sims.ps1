@@ -1,11 +1,16 @@
 # ============================================================
-# run_all_sims.ps1 — DPDAC Simulation Runner
+# run_all_sims.ps1 - DPDAC Simulation Runner
 # Usage:  .\run_all_sims.ps1 [optional: test_name]
 #   e.g.  .\run_all_sims.ps1 stage3
 #         .\run_all_sims.ps1 stage4
 #         .\run_all_sims.ps1 full
 #         .\run_all_sims.ps1          (runs all)
 # ============================================================
+
+$ErrorActionPreference = "Continue"
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 
 $IVERILOG = "C:\iverilog\bin\iverilog.exe"
 $VVP      = "C:\iverilog\bin\vvp.exe"
@@ -17,9 +22,9 @@ $BIN      = "$ROOT\bin"
 # Create bin dir if needed
 if (-not (Test-Path $BIN)) { New-Item -ItemType Directory -Path $BIN | Out-Null }
 
-$pass  = 0
-$fail  = 0
-$skip  = 0
+$pass   = 0
+$fail   = 0
+$skip   = 0
 $filter = if ($args.Count -gt 0) { $args[0].ToLower() } else { "all" }
 
 # ---------------------------------------------------------------------------
@@ -65,7 +70,9 @@ $RTL_S4 = @(
     "$RTL\stage4\Stage4_top.v"
 )
 
-$RTL_TOP = @( "$RTL\DPDAC_top.v" )
+$RTL_TOP = @(
+    "$RTL\DPDAC_top.v"
+)
 
 # ---------------------------------------------------------------------------
 # Helper: compile + run a single testbench
@@ -90,7 +97,11 @@ function Run-TB {
     $compile_args = @("-g2012", "-o", $vvp_out, "-Wall") + $all_files
 
     Write-Host "[COMPILE] iverilog $($all_files[-1])" -ForegroundColor Yellow
-    & $IVERILOG @compile_args 2>&1 | Tee-Object -FilePath $log_out
+    $oldErrPref = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    $compile_output = & $IVERILOG @compile_args 2>&1
+    $ErrorActionPreference = $oldErrPref
+    $compile_output | Tee-Object -FilePath $log_out
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Compilation FAILED for $Name" -ForegroundColor Red
@@ -99,20 +110,26 @@ function Run-TB {
     }
 
     Write-Host "[SIM] Running $Name ..." -ForegroundColor Yellow
-    $sim_output = & $VVP $vvp_out 2>&1 | Tee-Object -FilePath $log_out -Append
+    $oldErrPref = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    $sim_output = & $VVP $vvp_out 2>&1
+    $ErrorActionPreference = $oldErrPref
+    $sim_output | Tee-Object -FilePath $log_out -Append
 
     # Check for PASS/FAIL keywords
-    $passed = $sim_output | Select-String -Pattern "ALL (TESTS )?PASSED|PASS \(" -Quiet
-    $failed = $sim_output | Select-String -Pattern "FAILED|ERROR:" -Quiet
+    $passed = $sim_output | Select-String -Pattern "ALL .*PASSED|RESULT: PASS|PASS \(|PASS \[" -Quiet
+    $failed = $sim_output | Select-String -Pattern "FAILED|FAIL \[|ERROR:" -Quiet
 
     if ($failed) {
-        Write-Host "[RESULT] $Name — FAIL" -ForegroundColor Red
+        Write-Host "[RESULT] $Name - FAIL" -ForegroundColor Red
         $script:fail++
-    } elseif ($passed) {
-        Write-Host "[RESULT] $Name — PASS" -ForegroundColor Green
+    }
+    elseif ($passed) {
+        Write-Host "[RESULT] $Name - PASS" -ForegroundColor Green
         $script:pass++
-    } else {
-        Write-Host "[RESULT] $Name — UNKNOWN (check log: $log_out)" -ForegroundColor Magenta
+    }
+    else {
+        Write-Host "[RESULT] $Name - UNKNOWN (check log: $log_out)" -ForegroundColor Magenta
         $script:skip++
     }
 }
@@ -159,7 +176,7 @@ Write-Host "============================================================" -Foreg
 Write-Host "  SIMULATION SUMMARY" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "  PASSED : $pass" -ForegroundColor Green
-Write-Host "  FAILED : $fail" -ForegroundColor $(if ($fail -gt 0) {'Red'} else {'Green'})
+Write-Host "  FAILED : $fail" -ForegroundColor $(if ($fail -gt 0) { 'Red' } else { 'Green' })
 Write-Host "  UNKNOWN: $skip" -ForegroundColor Magenta
 Write-Host ""
 Write-Host "  Logs saved to: $BIN" -ForegroundColor Gray

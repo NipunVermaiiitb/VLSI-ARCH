@@ -56,13 +56,17 @@ module component_formatter (
     
     // C_sign extraction with Para mode support for DP
     always @(*) begin
-        if (Prec == DP && Para && en_dp56) begin
-            // Para=1 in DP mode: Two SP signs from C1[63] and C0[31]
-            C_sign = {C_in[63], 1'b0, C_in[31], 1'b0};
+        if (Prec == DP && !Para && en_dp56) begin
+            // Single DP addend sign in lane0 position.
+            C_sign = {3'b000, C_in[63]};
+        end
+        else if (Prec == DP && Para && en_dp56) begin
+            // Para=1 in DP mode: two SP addend signs carried in low lanes.
+            C_sign = {2'b00, C_in[63], C_in[31]};
         end
         else begin
-            // Normal mode: Extract based on enable signals
-            C_sign = {C_in[63] & en_seg3, C_in[47] & en_seg2, C_in[31] & en_seg1, C_in[15] & en_seg0};
+            // Paper model: adder consumes at most two C addends (upper/lower groups).
+            C_sign = {2'b00, (C_in[63] & en_top28), (C_in[31] & en_bot28)};
         end
     end
 

@@ -7,7 +7,8 @@ module Stage2_Top (
     // Inputs directly from Stage 1 modules
     //------------------------------------------------
 
-    input  [111:0] partial_products_s1,
+    input  [111:0] partial_products_sum_s1,
+    input  [111:0] partial_products_carry_s1,
     input  [31:0]  ExpDiff_s1,
     input  [31:0]  MaxExp_s1,
     input  [63:0]  ProdASC_s1,
@@ -15,6 +16,7 @@ module Stage2_Top (
     input  [162:0] Aligned_C_s1,
 
     input  [3:0]   Sign_AB_s1,
+    input  [3:0]   Sign_C_s1,
 
     input  [2:0]   Prec_s1,
     input  [3:0]   Valid_s1,
@@ -46,7 +48,8 @@ module Stage2_Top (
     // Direct wire assignments (Stage1_Module already has pipeline register)
     //------------------------------------------------
 
-    wire [111:0] partial_products = partial_products_s1;
+    wire [111:0] partial_products_sum   = partial_products_sum_s1;
+    wire [111:0] partial_products_carry = partial_products_carry_s1;
     wire [31:0]  ExpDiff          = ExpDiff_s1;
     wire [31:0]  MaxExp           = MaxExp_s1;
     wire [63:0]  ProdASC          = ProdASC_s1;
@@ -54,6 +57,7 @@ module Stage2_Top (
     wire [162:0] Aligned_C        = Aligned_C_s1;
 
     wire [3:0]   Sign_AB          = Sign_AB_s1;
+    wire [3:0]   Sign_C           = Sign_C_s1;
 
     wire [2:0]   Prec             = Prec_s1;
     wire [3:0]   Valid            = Valid_s1;
@@ -82,7 +86,8 @@ module Stage2_Top (
 
     Stage2_Adder u_stage1_adder (
 
-        .partial_products(partial_products),
+        .partial_products_sum(partial_products_sum),
+        .partial_products_carry(partial_products_carry),
 
         .PD_mode(PD_mode),
         .PD2_mode(PD2_mode),
@@ -147,8 +152,15 @@ module Stage2_Top (
     // Forward C operand
     //------------------------------------------------
 
-    assign Aligned_C_dual_s2 = Aligned_C;
-    assign Aligned_C_high_s2 = Aligned_C;
+    // Paper-style routing into Stage3 4:2 adder:
+    //   - DP path: use a single aligned C input (avoid double counting).
+    //   - DPDAC path: split the 163-bit aligned C into two narrower inputs.
+    wire [162:0] c_dp_signed = Sign_C[0] ? (~Aligned_C + 163'd1) : Aligned_C;
+    wire [162:0] c_split_hi = {Aligned_C[162:82], 82'd0};
+    wire [162:0] c_split_lo = {81'd0, Aligned_C[81:0]};
+
+    assign Aligned_C_dual_s2 = PD_mode ? c_dp_signed : c_split_hi;
+    assign Aligned_C_high_s2 = PD_mode ? 163'd0   : c_split_lo;
 
     //------------------------------------------------
     // Forward control signals to Stage 3

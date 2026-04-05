@@ -40,9 +40,11 @@ module tb_DPDAC_top;
     // DP IEEE 754 constants
     localparam DP_1P5  = 64'h3FF8000000000000; // 1.5
     localparam DP_2P0  = 64'h4000000000000000; // 2.0
+    localparam DP_1P0  = 64'h3FF0000000000000; // 1.0
     localparam DP_0P5  = 64'h3FE0000000000000; // 0.5
     localparam DP_3P5  = 64'h400C000000000000; // 3.5  (expected: 1.5×2.0+0.5)
     localparam DP_N1P5 = 64'hBFF8000000000000; // -1.5
+    localparam DP_N1P0 = 64'hBFF0000000000000; // -1.0
     localparam DP_0P0  = 64'h0000000000000000; // 0.0
     localparam DP_N3P0 = 64'hC008000000000000; // -3.0 (expected: -1.5×2.0+0.0)
 
@@ -76,6 +78,12 @@ module tb_DPDAC_top;
         input        para, cvt;
         input integer latency;
         begin
+            // DP mode uses a 2-cycle iterative multiplier controlled by Stage1 cnt.
+            // Align launches to cnt==0 so each DP transaction starts on capture phase.
+            if (prec == DP) begin
+                while (dut.u_stage1.cnt !== 1'b0) @(posedge clk);
+            end
+
             A_in = a; B_in = b; C_in = c;
             Prec = prec; Para = para; Cvt = cvt;
             @(posedge clk);
@@ -97,6 +105,183 @@ module tb_DPDAC_top;
                 errors = errors + 1;
             end else
                 $display("  PASS [%0s]", name);
+        end
+    endtask
+
+    function [7:0] lzc163_tb;
+        input [162:0] v;
+        integer k;
+        begin
+            lzc163_tb = 8'd163;
+            for (k = 162; k >= 0; k = k - 1) begin
+                if (v[k]) begin
+                    lzc163_tb = 8'(162 - k);
+                    k = -1;
+                end
+            end
+        end
+    endfunction
+
+    function [162:0] csa4_sum_ref;
+        input [162:0] in0, in1, in2, in3;
+        reg [162:0] s1, c1;
+        begin
+            s1 = in0 ^ in1 ^ in2;
+            c1 = (in0 & in1) | (in0 & in2) | (in1 & in2);
+            csa4_sum_ref = s1 ^ in3 ^ c1;
+        end
+    endfunction
+
+    function [162:0] csa4_carry_ref;
+        input [162:0] in0, in1, in2, in3;
+        reg [162:0] s1, c1;
+        begin
+            s1 = in0 ^ in1 ^ in2;
+            c1 = (in0 & in1) | (in0 & in2) | (in1 & in2);
+            csa4_carry_ref = (s1 & in3) | (s1 & c1) | (in3 & c1);
+        end
+    endfunction
+
+    task check_stage_invariants;
+        input [256*8-1:0] tag;
+        input integer cyc;
+        reg [162:0] sum_ref;
+        reg [162:0] carry_ref;
+        reg [162:0] mag_ref;
+        reg [7:0]   lzc_comb_exact;
+        reg [7:0]   shift_amt;
+        reg         expected_sign;
+        integer     lzc_diff;
+        begin
+            // ---------------- Stage 2 CSA ----------------
+            sum_ref   = csa4_sum_ref(dut.u_stage2.signed_p0, dut.u_stage2.signed_p1,
+                                     dut.u_stage2.signed_p2, dut.u_stage2.signed_p3);
+            carry_ref = csa4_carry_ref(dut.u_stage2.signed_p0, dut.u_stage2.signed_p1,
+                                       dut.u_stage2.signed_p2, dut.u_stage2.signed_p3);
+            if ((dut.Sum_s2 !== sum_ref) || (dut.Carry_s2 !== carry_ref)) begin
+                $display("    CHK FAIL [%0s c%0d] S2 4:2 CSA mismatch", tag, cyc);
+                errors = errors + 1;
+            end else begin
+                $display("    CHK PASS [%0s c%0d] S2 4:2 CSA", tag, cyc);
+            end
+
+            // ---------------- Stage 2 C routing ----------------
+            if (dut.PD_mode_s2) begin
+                if (dut.Aligned_C_high_s2 !== 163'd0) begin
+                    $display("    CHK FAIL [%0s c%0d] PD-mode expects C_high path gated to zero", tag, cyc);
+                    errors = errors + 1;
+                end else begin
+                    $display("    CHK PASS [%0s c%0d] PD-mode C routing", tag, cyc);
+                end
+            end else begin
+                if ((dut.Aligned_C_dual_s2[81:0] !== 82'd0) || (dut.Aligned_C_high_s2[162:82] !== 81'd0)) begin
+                    $display("    CHK FAIL [%0s c%0d] non-PD C split shape mismatch", tag, cyc);
+                    errors = errors + 1;
+                end else begin
+                    $display("    CHK PASS [%0s c%0d] non-PD C split shape", tag, cyc);
+                end
+            end
+
+            // ---------------- Stage 3 CSA + CPA ----------------
+            sum_ref   = csa4_sum_ref(dut.u_stage3.Sum, dut.u_stage3.Carry,
+                                     dut.u_stage3.Aligned_C_dual, dut.u_stage3.Aligned_C_high);
+            carry_ref = csa4_carry_ref(dut.u_stage3.Sum, dut.u_stage3.Carry,
+                                       dut.u_stage3.Aligned_C_dual, dut.u_stage3.Aligned_C_high);
+            if ((dut.u_stage3.Sum2 !== sum_ref) || (dut.u_stage3.Carry2 !== carry_ref)) begin
+                $display("    CHK FAIL [%0s c%0d] S3 4:2 CSA mismatch", tag, cyc);
+                errors = errors + 1;
+            end else begin
+                $display("    CHK PASS [%0s c%0d] S3 4:2 CSA", tag, cyc);
+            end
+
+            if (dut.u_stage3.Add_Rslt_comb !== (dut.u_stage3.Sum2 + dut.u_stage3.Carry2)) begin
+                $display("    CHK FAIL [%0s c%0d] S3 CPA mismatch", tag, cyc);
+                errors = errors + 1;
+            end else begin
+                $display("    CHK PASS [%0s c%0d] S3 CPA", tag, cyc);
+            end
+
+            // ---------------- SignGen + Complement/INC+1 ----------------
+            expected_sign = (dut.u_stage3.Add_Rslt_comb === 163'd0) ? 1'b0 : dut.u_stage3.Add_Rslt_comb[162];
+            if (dut.u_stage3.Result_sign_comb !== expected_sign) begin
+                $display("    CHK FAIL [%0s c%0d] Sign_Gen mismatch (exp=%b got=%b)",
+                         tag, cyc, expected_sign, dut.u_stage3.Result_sign_comb);
+                errors = errors + 1;
+            end else begin
+                $display("    CHK PASS [%0s c%0d] Sign_Gen", tag, cyc);
+            end
+
+            mag_ref = expected_sign ? ((~dut.u_stage3.Add_Rslt_comb) + 163'd1) : dut.u_stage3.Add_Rslt_comb;
+            if (dut.u_stage3.Add_Rslt_mag !== mag_ref) begin
+                $display("    CHK FAIL [%0s c%0d] Complement/INC+1 magnitude mismatch", tag, cyc);
+                errors = errors + 1;
+            end else begin
+                $display("    CHK PASS [%0s c%0d] Complement/INC+1", tag, cyc);
+            end
+
+            // ---------------- LZAC ----------------
+            lzc_comb_exact = lzc163_tb(dut.u_stage3.Add_Rslt_comb);
+            lzc_diff = (dut.u_stage3.LZA_CNT_comb > lzc_comb_exact) ?
+                       (dut.u_stage3.LZA_CNT_comb - lzc_comb_exact) :
+                       (lzc_comb_exact - dut.u_stage3.LZA_CNT_comb);
+
+            if (lzc_diff > 1) begin
+                $display("    CHK FAIL [%0s c%0d] LZAC error >1 (pred=%0d exact=%0d)",
+                         tag, cyc, dut.u_stage3.LZA_CNT_comb, lzc_comb_exact);
+                errors = errors + 1;
+            end else begin
+                $display("    CHK PASS [%0s c%0d] LZAC error<=1 (pred=%0d exact=%0d)",
+                         tag, cyc, dut.u_stage3.LZA_CNT_comb, lzc_comb_exact);
+            end
+
+            if (dut.LZA_CNT_s3 !== lzc163_tb(dut.Add_Rslt_s3)) begin
+                $display("    CHK FAIL [%0s c%0d] S3 registered LZA mismatch", tag, cyc);
+                errors = errors + 1;
+            end else begin
+                $display("    CHK PASS [%0s c%0d] S3 registered LZA", tag, cyc);
+            end
+
+            // ---------------- Stage 4 normalization + GRS ----------------
+            shift_amt = (dut.LZA_CNT_s3 > 8'd162) ? 8'd162 : dut.LZA_CNT_s3;
+            if (dut.u_stage4.Norm_mant !== (dut.Add_Rslt_s3 << shift_amt)) begin
+                $display("    CHK FAIL [%0s c%0d] S4 normalization shift mismatch", tag, cyc);
+                errors = errors + 1;
+            end else begin
+                $display("    CHK PASS [%0s c%0d] S4 normalization shift", tag, cyc);
+            end
+
+            if ((dut.u_stage4.G !== dut.u_stage4.Norm_mant[109]) ||
+                (dut.u_stage4.R !== dut.u_stage4.Norm_mant[108]) ||
+                (dut.u_stage4.S !== |dut.u_stage4.Norm_mant[107:0])) begin
+                $display("    CHK FAIL [%0s c%0d] S4 G/R/S extraction mismatch", tag, cyc);
+                errors = errors + 1;
+            end else begin
+                $display("    CHK PASS [%0s c%0d] S4 G/R/S extraction", tag, cyc);
+            end
+        end
+    endtask
+
+    task print_stage_snapshot;
+        input integer cyc;
+        begin
+            $display("  [cycle %0d] S1: cnt=%b valid=%b mode(DP/PD2/PD4)=%b/%b/%b SignAB=%b SignC=%b",
+                     cyc, dut.u_stage1.cnt, dut.valid_s1, dut.PD_mode_s1, dut.PD2_mode_s1, dut.PD4_mode_s1,
+                     dut.Sign_AB_s1, dut.Sign_C_s1);
+            $display("             S1: MaxExp=%h ExpDiff=%h ProdASC[31:0]=%h pp_sum[31:0]=%h pp_carry[31:0]=%h",
+                     dut.MaxExp_s1, dut.ExpDiff_s1, dut.ProdASC_s1[31:0], dut.pp_sum_s1[31:0], dut.pp_carry_s1[31:0]);
+            $display("             S2: Sum[127:96]=%h Carry[127:96]=%h C_dual[162:140]=%h C_high[162:140]=%h",
+                     dut.Sum_s2[127:96], dut.Carry_s2[127:96], dut.Aligned_C_dual_s2[162:140], dut.Aligned_C_high_s2[162:140]);
+            $display("             S3: Add_Rslt[162:140]=%h LZA=%0d Sign=%b",
+                     dut.Add_Rslt_s3[162:140], dut.LZA_CNT_s3, dut.Result_sign_s3);
+            $display("             S4: MaxExp_s4=%h Result_out=%h Valid=%b Sign=%b",
+                     dut.MaxExp_s4_reg, Result_out, Valid_out, Result_sign_out);
+            $display("             S4: exp_ab=%0d exp_c=%0d exp_raw=%0d exp_adj=%0d ovf=%b rnd_carry=%b",
+                     $signed(dut.u_stage4.u_out_fmt.exp_ab_raw),
+                     $signed(dut.u_stage4.u_out_fmt.exp_c_raw),
+                     $signed(dut.u_stage4.u_out_fmt.exp_raw),
+                     $signed(dut.u_stage4.u_out_fmt.exp_adj),
+                     dut.u_stage4.overflow_flag,
+                     dut.u_stage4.u_out_fmt.rnd_carry);
         end
     endtask
 
@@ -269,6 +454,135 @@ module tb_DPDAC_top;
         if (errors == tc_errors) $display("  TC-DPDAC-7: PASS");
         else                     $display("  TC-DPDAC-7: FAIL");
 
+        // ----------------------------------------------------------
+        // TC-DPDAC-8: DP C-only pass-through
+        //   0.0 × 0.0 + 1.0 = 1.0
+        // Stresses Stage3 addend path correctness.
+        // ----------------------------------------------------------
+        tc_errors = errors;
+        $display("\n--- TC-DPDAC-8: DP C-only +1.0 passthrough ---");
+        drive_and_wait(DP_0P0, DP_0P0, DP_1P0, DP, 0, 0, DP_LATENCY);
+        $display("  Result_out   = 0x%016h", Result_out);
+        $display("  Expected     = 0x%016h", DP_1P0);
+        $display("  DBG MaxExp_s4=0x%08h LZA=%0d Sign=%b", dut.MaxExp_s4_reg, dut.LZA_CNT_s3, dut.Result_sign_s3);
+        $display("  DBG Add_Rslt_s3[162:140]=0x%h", dut.Add_Rslt_s3[162:140]);
+        $display("  DBG exp_ab=%0d exp_c=%0d exp_raw=%0d exp_adj=%0d",
+             $signed(dut.u_stage4.u_out_fmt.exp_ab_raw),
+             $signed(dut.u_stage4.u_out_fmt.exp_c_raw),
+             $signed(dut.u_stage4.u_out_fmt.exp_raw),
+             $signed(dut.u_stage4.u_out_fmt.exp_adj));
+        check("DP_C_only_pos1", (Result_out === DP_1P0), "DP: 0*0 + 1.0 should be 1.0");
+        if (errors == tc_errors) $display("  TC-DPDAC-8: PASS");
+        else                     $display("  TC-DPDAC-8: FAIL");
+
+        // ----------------------------------------------------------
+        // TC-DPDAC-9: DP C-only pass-through (negative)
+        //   0.0 × 0.0 + (-1.0) = -1.0
+        // ----------------------------------------------------------
+        tc_errors = errors;
+        $display("\n--- TC-DPDAC-9: DP C-only -1.0 passthrough ---");
+        drive_and_wait(DP_0P0, DP_0P0, DP_N1P0, DP, 0, 0, DP_LATENCY);
+        $display("  Result_out   = 0x%016h", Result_out);
+        $display("  Expected     = 0x%016h", DP_N1P0);
+        $display("  DBG MaxExp_s4=0x%08h LZA=%0d Sign=%b", dut.MaxExp_s4_reg, dut.LZA_CNT_s3, dut.Result_sign_s3);
+        $display("  DBG Add_Rslt_s3[162:140]=0x%h", dut.Add_Rslt_s3[162:140]);
+        check("DP_C_only_neg1", (Result_out === DP_N1P0), "DP: 0*0 + (-1.0) should be -1.0");
+        if (errors == tc_errors) $display("  TC-DPDAC-9: PASS");
+        else                     $display("  TC-DPDAC-9: FAIL");
+
+        // ----------------------------------------------------------
+        // TC-DPDAC-10: DP C-only fractional pass-through
+        //   0.0 × 0.0 + 0.5 = 0.5
+        // ----------------------------------------------------------
+        tc_errors = errors;
+        $display("\n--- TC-DPDAC-10: DP C-only +0.5 passthrough ---");
+        drive_and_wait(DP_0P0, DP_0P0, DP_0P5, DP, 0, 0, DP_LATENCY);
+        $display("  Result_out   = 0x%016h", Result_out);
+        $display("  Expected     = 0x%016h", DP_0P5);
+        check("DP_C_only_pos05", (Result_out === DP_0P5), "DP: 0*0 + 0.5 should be 0.5");
+        if (errors == tc_errors) $display("  TC-DPDAC-10: PASS");
+        else                     $display("  TC-DPDAC-10: FAIL");
+
+        // ----------------------------------------------------------
+        // TC-DPDAC-11: SP exact dual-lane numeric check
+        // Paper claim: parallel SP operations should preserve independent lane results.
+        // Expected lane1=3.5f (upper), lane0=2.0f (lower).
+        // ----------------------------------------------------------
+        tc_errors = errors;
+        $display("\n--- TC-DPDAC-11: SP exact lane-value check (paper-claim stress) ---");
+        $display("  EXPECTED DATAFLOW: independent SP lane math through S1-S4, not structural-only.");
+        A_in = SP_DUAL_A; B_in = SP_DUAL_B; C_in = SP_DUAL_C;
+        Prec = SP; Para = 0; Cvt = 0;
+        for (integer cyc11 = 0; cyc11 < (SP_LATENCY + 3); cyc11 = cyc11 + 1) begin
+            @(posedge clk); #1;
+            print_stage_snapshot(cyc11);
+            check_stage_invariants("TC11", cyc11);
+        end
+        $display("  Final Result_out = 0x%016h", Result_out);
+        $display("  Expected         = 0x4060000040000000 (upper=3.5f, lower=2.0f)");
+        check("SP_exact_dual_lane", (Result_out === 64'h4060000040000000),
+              "SP dual-lane exact numeric mismatch vs paper parallel-lane claim");
+        if (errors == tc_errors) $display("  TC-DPDAC-11: PASS");
+        else                     $display("  TC-DPDAC-11: FAIL (use stage trace above to debug)");
+
+        // ----------------------------------------------------------
+        // TC-DPDAC-12: BF16 exact quad-lane numeric check
+        // Paper claim: BF16 mode supported in DPDAC path; 1.0*1.0+0 should remain 1.0 in each lane.
+        // ----------------------------------------------------------
+        tc_errors = errors;
+        $display("\n--- TC-DPDAC-12: BF16 exact lane-value check (paper-claim stress) ---");
+        begin : tc12
+            reg [63:0] bf16_a;
+            bf16_a = 64'd0;
+            bf16_a[62:55] = 8'd127;
+            bf16_a[46:39] = 8'd127;
+            bf16_a[30:23] = 8'd127;
+            bf16_a[14:7]  = 8'd127;
+            A_in = bf16_a; B_in = bf16_a; C_in = 64'd0;
+            Prec = BF16; Para = 0; Cvt = 0;
+            for (integer cyc12 = 0; cyc12 < (SP_LATENCY + 3); cyc12 = cyc12 + 1) begin
+                @(posedge clk); #1;
+                print_stage_snapshot(cyc12);
+                check_stage_invariants("TC12", cyc12);
+            end
+            $display("  Final Result_out = 0x%016h", Result_out);
+            $display("  Expected         = 0x3f803f803f803f80 (BF16 1.0 per lane)");
+            check("BF16_exact_quad_lane", (Result_out === 64'h3f803f803f803f80),
+                  "BF16 lane-value mismatch vs paper supported-format claim");
+            if (errors == tc_errors) $display("  TC-DPDAC-12: PASS");
+            else                     $display("  TC-DPDAC-12: FAIL (use stage trace above to debug)");
+        end
+
+        // ----------------------------------------------------------
+        // TC-DPDAC-13: TF32 exact dual-lane numeric check
+        // Paper claim: 2-term TF32 dot-product supported in PD2_mode.
+        // Here we stress identity behavior: 1.0*1.0+0.0 per active lane.
+        // ----------------------------------------------------------
+        tc_errors = errors;
+        $display("\n--- TC-DPDAC-13: TF32 exact lane-value check (paper-claim stress) ---");
+        begin : tc13
+            reg [63:0] tf32_one;
+            tf32_one = 64'd0;
+            tf32_one[62:55] = 8'd127;
+            tf32_one[41:32] = 10'd0;
+            tf32_one[30:23] = 8'd127;
+            tf32_one[9:0]   = 10'd0;
+
+            A_in = tf32_one; B_in = tf32_one; C_in = 64'd0;
+            Prec = TF32; Para = 0; Cvt = 0;
+            for (integer cyc13 = 0; cyc13 < (SP_LATENCY + 3); cyc13 = cyc13 + 1) begin
+                @(posedge clk); #1;
+                print_stage_snapshot(cyc13);
+                check_stage_invariants("TC13", cyc13);
+            end
+            $display("  Final Result_out = 0x%016h", Result_out);
+            $display("  Expected         = 0x3f8000003f800000 (TF32 1.0 in active lanes)");
+            check("TF32_exact_dual_lane", (Result_out === 64'h3f8000003f800000),
+                  "TF32 lane-value mismatch vs paper supported-format claim");
+            if (errors == tc_errors) $display("  TC-DPDAC-13: PASS");
+            else                     $display("  TC-DPDAC-13: FAIL (use stage trace above to debug)");
+        end
+
 
         // ----------------------------------------------------------
         // Summary
@@ -277,7 +591,7 @@ module tb_DPDAC_top;
         $display("\n===================================================");
         $display("Full Pipeline Results:");
         if (errors == 0)
-            $display("  ALL TESTS PASSED (7/7)");
+            $display("  ALL TESTS PASSED (13/13)");
         else
             $display("  FAILED: %0d errors", errors);
         $display("===================================================");

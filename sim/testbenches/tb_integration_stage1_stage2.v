@@ -32,6 +32,7 @@ module tb_integration_stage1_stage2;
     wire [31:0]  s1_MaxExp;
     wire [162:0] s1_Aligned_C;
     wire [3:0]   s1_Sign_AB;
+    wire [3:0]   s1_Sign_C;
     wire         s1_valid_out;
     wire         s1_PD_mode;
     wire         s1_PD2_mode;
@@ -53,6 +54,7 @@ module tb_integration_stage1_stage2;
         .MaxExp(s1_MaxExp),
         .Aligned_C(s1_Aligned_C),
         .Sign_AB(s1_Sign_AB),
+        .Sign_C(s1_Sign_C),
         .valid_out(s1_valid_out),
         .PD_mode(s1_PD_mode),
         .PD2_mode(s1_PD2_mode),
@@ -62,7 +64,8 @@ module tb_integration_stage1_stage2;
     // -----------------------------------------------------------------
     // Stage 2 Module (Stage2_Top) signals
     // -----------------------------------------------------------------
-    wire [111:0] s2_partial_products = s1_partial_products_sum | s1_partial_products_carry;
+    wire [111:0] s2_partial_products_sum   = s1_partial_products_sum;
+    wire [111:0] s2_partial_products_carry = s1_partial_products_carry;
     wire [3:0]   s2_Valid_in = {4{s1_valid_out}};  // Replicate single bit to 4 lanes for testing
 
     wire [162:0] s2_Sum;
@@ -77,12 +80,14 @@ module tb_integration_stage1_stage2;
     Stage2_Top u_stage2 (
         .clk(clk),
         .rst_n(rst_n),
-        .partial_products_s1(s2_partial_products),
+        .partial_products_sum_s1(s2_partial_products_sum),
+        .partial_products_carry_s1(s2_partial_products_carry),
         .ExpDiff_s1(s1_ExpDiff),
         .MaxExp_s1(s1_MaxExp),
         .ProdASC_s1(s1_ProdASC),
         .Aligned_C_s1(s1_Aligned_C),
         .Sign_AB_s1(s1_Sign_AB),
+        .Sign_C_s1(s1_Sign_C),
         .Prec_s1(s1_Prec),
         .Valid_s1(s2_Valid_in),
         .PD_mode_s1(s1_PD_mode),

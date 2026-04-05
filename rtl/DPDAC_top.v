@@ -58,6 +58,7 @@ module DPDAC_top (
     wire [63:0]  ProdASC_s1;
     wire [162:0] Aligned_C_s1;
     wire [3:0]   Sign_AB_s1;
+    wire [3:0]   Sign_C_s1;
     wire         Para_s1, Cvt_s1, valid_s1;
     wire         PD_mode_s1, PD2_mode_s1, PD4_mode_s1;
 
@@ -83,6 +84,7 @@ module DPDAC_top (
 
         .Aligned_C             (Aligned_C_s1),
         .Sign_AB               (Sign_AB_s1),
+        .Sign_C                (Sign_C_s1),
 
         .Para_reg              (Para_s1),
         .Cvt_reg               (Cvt_s1),
@@ -94,11 +96,11 @@ module DPDAC_top (
 
     );
 
-    // Combine carry-save partial products from Stage 1 into a single value.
-    // Stage2_Adder expects a combined product (not carry-save form), so we
-    // must do a binary addition here. For PD2/PD4 the lane products are packed
-    // in the lower bits and adding sum+carry gives the correct per-lane products.
-    wire [111:0] partial_products_s1 = pp_sum_s1 + pp_carry_s1;
+    // Keep Stage1 carry-save product rows separate into Stage2.
+    // Stage2 performs mode-dependent compression (PD2: +3:2, PD4: 4:2-only path,
+    // PD: bypass).
+    wire [111:0] partial_products_sum_s1   = pp_sum_s1;
+    wire [111:0] partial_products_carry_s1 = pp_carry_s1;
 
     // Determine Prec and Valid for downstream stages from Stage1 internals
     // Stage1_Module re-registers Prec internally; we need to pass it forward.
@@ -139,7 +141,8 @@ module DPDAC_top (
         .clk                (clk),
         .rst_n              (rst_n),
 
-        .partial_products_s1(partial_products_s1),
+        .partial_products_sum_s1(partial_products_sum_s1),
+        .partial_products_carry_s1(partial_products_carry_s1),
         .ExpDiff_s1         (ExpDiff_s1),
         .MaxExp_s1          (MaxExp_s1),
         .ProdASC_s1         (ProdASC_s1),
@@ -147,6 +150,7 @@ module DPDAC_top (
         .Aligned_C_s1       (Aligned_C_s1),
 
         .Sign_AB_s1         (Sign_AB_s1),
+        .Sign_C_s1          (Sign_C_s1),
 
         .Prec_s1            (Prec_s1_wire),
         .Valid_s1           (Valid_s1_wire),

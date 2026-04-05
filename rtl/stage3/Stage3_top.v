@@ -35,6 +35,20 @@ module Stage3_Top (
 
 );
 
+    function [7:0] lzc163;
+        input [162:0] v;
+        integer k;
+        begin
+            lzc163 = 8'd163;
+            for (k = 162; k >= 0; k = k - 1) begin
+                if (v[k]) begin
+                    lzc163 = 8'(162 - k);
+                    k = -1;
+                end
+            end
+        end
+    endfunction
+
     //------------------------------------------------
     // Stage 2 pipeline register
     //------------------------------------------------
@@ -186,6 +200,8 @@ module Stage3_Top (
 
     );
 
+    wire [7:0] LZA_CNT_exact = lzc163(Add_Rslt_mag);
+
     //------------------------------------------------
     // Stage 3 pipeline register → Stage 4
     //------------------------------------------------
@@ -197,11 +213,9 @@ module Stage3_Top (
 
         .Add_Rslt_in(Add_Rslt_mag),
         .Result_sign_in(Result_sign_comb),
-        // LZA correction for negative results:
-        // LZAC runs on two's complement form (MSB=1 → LZA=0).
-        // After Complementer+INC the true leading bit is 1 position lower,
-        // so we increment LZA_CNT by 1 when sign=1 to compensate.
-        .LZA_CNT_in(Result_sign_comb ? (LZA_CNT_comb + 8'd1) : LZA_CNT_comb),
+        // Use exact LZC from post-complement magnitude to avoid sign-dependent
+        // anticipation errors on addend-dominant paths.
+        .LZA_CNT_in(LZA_CNT_exact),
 
         .Prec_in(Prec),
         .Valid_in(Valid),

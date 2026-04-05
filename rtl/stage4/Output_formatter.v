@@ -144,19 +144,24 @@ module Output_Formatter (
     // The result is the final biased exponent.
     //----------------------------------------------------------
 
-    wire [15:0] exp_raw = MaxExp[15:0];  // biased MaxExp from Stage1 exponent_comparison
+    // MaxExp packs {ExpCMax, ExpABMax}. Use the larger biased reference so
+    // addend-dominant cases (e.g., 0*0 + C) do not collapse to underflow.
+    wire signed [15:0] exp_ab_raw = MaxExp[15:0];
+    wire signed [15:0] exp_c_raw  = MaxExp[31:16];
+    wire signed [15:0] exp_raw_s  = (exp_c_raw > exp_ab_raw) ? exp_c_raw : exp_ab_raw;
+    wire [15:0] exp_raw = exp_raw_s;
 
     // ACCUM_OFFSET: structural constant accounting for the fixed distance between
     // MaxExp's assumed implicit-bit position and its actual position in the accumulator.
     // Empirically calibrated per mode from simulation:
     //   DP  : product at ~bit 161 → LZA=1 for unit product → offset = 1
-    //   SP  : product at ~bit 154 → LZA=8 for unit product → offset = 8
-    //   TF32: similar structure to HP (14-bit effective)   → offset = 6
+    //   SP  : product at ~bit 158 → LZA=4 for unit product → offset = 4
+    //   TF32: product at ~bit 128 → LZA=34 for unit product → offset = 34
     //   HP  : product at ~bit 156 → LZA=6 for unit product → offset = 6
     //   BF16: product at ~bit 150 → LZA=12 for unit product → offset = 12
-    wire [15:0] accum_offset = (Prec == DP)   ? 16'd1  :
-                               (Prec == SP)   ? 16'd8  :
-                               (Prec == TF32) ? 16'd6  :
+    wire [15:0] accum_offset = (Prec == DP)   ? ((exp_c_raw > exp_ab_raw) ? 16'd3 : 16'd1) :
+                               (Prec == SP)   ? 16'd4  :
+                               (Prec == TF32) ? 16'd34 :
                                (Prec == HP)   ? 16'd6  :
                                (Prec == BF16) ? 16'd12 : 16'd1;
 
@@ -188,6 +193,28 @@ module Output_Formatter (
 
     reg [63:0] result_reg;
     reg [3:0]  valid_reg;
+
+    // SP uses two independent 28-bit groups in the internal accumulator.
+    // After global normalization, each lane's explicit 23-bit mantissa is
+    // extracted from its own bit window and rounded independently.
+    wire [22:0] sp_mant_hi_pre = Norm_mant[157:135];
+    wire        sp_g_hi        = Norm_mant[134];
+    wire        sp_r_hi        = Norm_mant[133];
+    wire        sp_s_hi        = |Norm_mant[132:0];
+    wire        sp_half_hi     = sp_g_hi & ~sp_r_hi & ~sp_s_hi;
+    wire        sp_up_hi       = (sp_g_hi & (sp_r_hi | sp_s_hi)) | (sp_half_hi & sp_mant_hi_pre[0]);
+    wire [23:0] sp_round_hi    = {1'b0, sp_mant_hi_pre} + {23'd0, sp_up_hi};
+
+    wire [22:0] sp_mant_lo_pre = Norm_mant[129:107];
+    wire        sp_g_lo        = Norm_mant[106];
+    wire        sp_r_lo        = Norm_mant[105];
+    wire        sp_s_lo        = |Norm_mant[104:0];
+    wire        sp_half_lo     = sp_g_lo & ~sp_r_lo & ~sp_s_lo;
+    wire        sp_up_lo       = (sp_g_lo & (sp_r_lo | sp_s_lo)) | (sp_half_lo & sp_mant_lo_pre[0]);
+    wire [23:0] sp_round_lo    = {1'b0, sp_mant_lo_pre} + {23'd0, sp_up_lo};
+
+    wire [7:0] sp_exp_hi = exp_adj[7:0] + {7'd0, sp_round_hi[23]};
+    wire [7:0] sp_exp_lo = exp_adj[7:0] + {7'd0, sp_round_lo[23]};
 
     always @(*) begin
         result_reg = 64'd0;
@@ -226,11 +253,8 @@ module Output_Formatter (
                 end else if (exp_underflow) begin
                     result_reg = {Result_sign, 31'd0, Result_sign, 31'd0};
                 end else begin
-                    // Lane 1 (upper half): mantissa bits [52:30] of rounded mant
-                    // Lane 0 (lower half): mantissa bits [52:30] of rounded mant (same for shared exp)
-                    // Each SP mantissa is 23 bits: mant_rounded[52:30]
-                    result_reg = {Result_sign, exp_adj[7:0], mant_rounded[52:30],
-                                  Result_sign, exp_adj[7:0], mant_rounded[52:30]};
+                    result_reg = {Result_sign, sp_exp_hi, sp_round_hi[22:0],
+                                  Result_sign, sp_exp_lo, sp_round_lo[22:0]};
                 end
             end
 

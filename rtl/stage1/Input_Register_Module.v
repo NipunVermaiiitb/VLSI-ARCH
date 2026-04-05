@@ -33,6 +33,7 @@ module Stage1_Module (
 
     // Product sign
     output reg [3:0]   Sign_AB,
+    output reg [3:0]   Sign_C,
 
     //input pass
     output reg         Para_reg,
@@ -224,6 +225,7 @@ module Stage1_Module (
             ProdASC          <= 64'd0;
             Aligned_C        <= 163'd0;
             Sign_AB          <= 4'd0;
+            Sign_C           <= 4'd0;
             Para_reg         <= 1'b0;
             Cvt_reg          <= 1'b0;
             valid_out        <= 1'b0;
@@ -236,6 +238,7 @@ module Stage1_Module (
             ProdASC          <= ProdASC_w;
             Aligned_C        <= Aligned_C_w;
             Sign_AB          <= Sign_AB_w;
+            Sign_C           <= C_sign_raw;
             Para_reg         <= Para_reg_int;
             Cvt_reg          <= Cvt_reg_int;
             
