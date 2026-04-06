@@ -225,7 +225,7 @@ module Stage1_Module (
             ProdASC          <= 64'd0;
             Aligned_C        <= 163'd0;
             Sign_AB          <= 4'd0;
-            Sign_C           <= 4'd0  
+            Sign_C           <= 4'd0;  
             Para_reg         <= 1'b0;
             Cvt_reg          <= 1'b0;
             valid_out        <= 1'b0;
