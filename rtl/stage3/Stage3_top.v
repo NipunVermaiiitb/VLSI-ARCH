@@ -121,12 +121,12 @@ module Stage3_Top (
 
     );
 
-    always @(posedge clk) begin
-        if (Prec == 3'b100 && Valid == 4'b1111) begin
-            $display("[DEBUG S3] Sum[161:159]=%b, Carry[161:159]=%b, C_dual[161:159]=%b, Rslt[161:159]=%b, Rslt_mag[161:159]=%b, LZA=%d",
-                     Sum[161:159], Carry[161:159], Aligned_C_dual[161:159], Add_Rslt_comb[161:159], Add_Rslt_mag[161:159], LZA_CNT_comb);
-        end
-    end
+    // always @(posedge clk) begin
+    //     if (Prec == 3'b100 && Valid == 4'b1111) begin
+    //         $display("[DEBUG S3] Sum[161:159]=%b, Carry[161:159]=%b, C_dual[161:159]=%b, Rslt[161:159]=%b, Rslt_mag[161:159]=%b, LZA=%d",
+    //                  Sum[161:159], Carry[161:159], Aligned_C_dual[161:159], Add_Rslt_comb[161:159], Add_Rslt_mag[161:159], LZA_CNT_comb);
+    //     end
+    // end
 
     //------------------------------------------------
     // Sign determination: MSB of the CPA result

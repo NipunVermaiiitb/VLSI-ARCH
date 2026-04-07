@@ -157,14 +157,14 @@ module Stage2_Top (
 
     );
 
-    reg [31:0] dbg_cnt2 = 0;
-    always @(posedge clk) begin
-        if (Prec_s1 == 3'b100 && Valid_s1 == 4'b1111 && Para_s1 == 0) begin
-            $display("[DEBUG S2 %d] cnt0=%b signed_p0[161:159]=%b, C_dual[161:159]=%b, C_hi_s1[161:159]=%b, C_lo_s1[161:159]=%b, asc_c1=%d asc_c0=%d",
-                     dbg_cnt2, (Sum_s2[0] ^ Sum_s2[0]), signed_p0[161:159], Aligned_C_dual[161:159], Aligned_C_hi_s1[161:159], Aligned_C_lo_s1[161:159], ExpDiff_s1[31:16], ExpDiff_s1[15:0]);
-        end
-        dbg_cnt2 <= dbg_cnt2 + 1;
-    end
+    // reg [31:0] dbg_cnt2 = 0;
+    // always @(posedge clk) begin
+    //     if (Prec_s1 == 3'b100 && Valid_s1 == 4'b1111 && Para_s1 == 0) begin
+    //         $display("[DEBUG S2 %d] cnt0=%b signed_p0[161:159]=%b, C_dual[161:159]=%b, C_hi_s1[161:159]=%b, C_lo_s1[161:159]=%b, asc_c1=%d asc_c0=%d",
+    //                  dbg_cnt2, (Sum_s2[0] ^ Sum_s2[0]), signed_p0[161:159], Aligned_C_dual[161:159], Aligned_C_hi_s1[161:159], Aligned_C_lo_s1[161:159], ExpDiff_s1[31:16], ExpDiff_s1[15:0]);
+    //     end
+    //     dbg_cnt2 <= dbg_cnt2 + 1;
+    // end
 
     //------------------------------------------------
     // Forward C operand paths to Stage 3 pipeline register
