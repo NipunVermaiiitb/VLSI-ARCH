@@ -184,25 +184,17 @@ module low_cost_multiplier_array (
     end
 
     //----------------------------------------------------------
-    // DP cycle 1: Merge path with 56-bit partial CSA
+    // DP cycle 1: Merge cross-terms (Cycle 0) with direct-terms (Cycle 1)
     //----------------------------------------------------------
-    // Split into high/low halves for intermediate compression
-    wire [55:0] sum_prev, carry_prev;
-    csa4_2 #(.W(56)) u_csa56_prev (
-        .x(reg_sum0_dp[111:56]),
-        .y(reg_carry0_dp[111:56]),
-        .z(reg_sum0_dp[55:0]),
-        .w(reg_carry0_dp[55:0]),
-        .sum(sum_prev),
-        .carry(carry_prev)
-    );
+    // Cross-terms (A_L×B_H, A_H×B_L) are computed in Cycle 0 and stored in
+    // reg_sum0_dp / reg_carry0_dp. These cross-terms need a 2^28 weight factor
+    // (because e.g. A_L×B_H_int must be scaled by 2^28 for B_H's weight).
+    // Apply this by shifting the entire 112-bit CSA result left by 28 bits.
+    // No intermediate CSA compression is needed — that would destroy positions.
+    wire [111:0] sum_prev_aligned   = {reg_sum0_dp[83:0],   28'd0};
+    wire [111:0] carry_prev_aligned = {reg_carry0_dp[83:0], 28'd0};
 
-    // Proper alignment of the partial products
-    wire [111:0] sum_prev_aligned   = {28'd0, sum_prev, 28'd0};
-    wire [111:0] carry_prev_aligned = {28'd0, carry_prev, 28'd0};
-
-
-    // Final 112-bit addition of aligned data
+    // Final 4:2 CSA: merge shifted Cycle-0 cross-terms with Cycle-1 direct-terms
     wire [111:0] gsum1, gcarry1;
     csa4_2 #(.W(112)) u_csa112_stage2 (
         .x(sum_prev_aligned),

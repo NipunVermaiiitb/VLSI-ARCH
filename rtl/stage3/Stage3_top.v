@@ -107,21 +107,6 @@ module Stage3_Top (
     );
 
     //------------------------------------------------
-    // LZAC: runs in parallel with the CPA
-    //------------------------------------------------
-
-    wire [7:0] LZA_CNT_comb;
-
-    LZAC u_lzac (
-
-        .Sum(Sum2),
-        .Carry(Carry2),
-
-        .LZA_CNT(LZA_CNT_comb)
-
-    );
-
-    //------------------------------------------------
     // Final 163-bit carry-propagate adder (CPA)
     //------------------------------------------------
 
@@ -135,6 +120,13 @@ module Stage3_Top (
         .SUM(Add_Rslt_comb)
 
     );
+
+    always @(posedge clk) begin
+        if (Prec == 3'b100 && Valid == 4'b1111) begin
+            $display("[DEBUG S3] Sum[161:159]=%b, Carry[161:159]=%b, C_dual[161:159]=%b, Rslt[161:159]=%b, Rslt_mag[161:159]=%b, LZA=%d",
+                     Sum[161:159], Carry[161:159], Aligned_C_dual[161:159], Add_Rslt_comb[161:159], Add_Rslt_mag[161:159], LZA_CNT_comb);
+        end
+    end
 
     //------------------------------------------------
     // Sign determination: MSB of the CPA result
@@ -187,6 +179,22 @@ module Stage3_Top (
     );
 
     //------------------------------------------------
+    // LZAC: compute leading zeros from final magnitude
+    // (Operates on Add_Rslt_mag to correctly handle negative numbers)
+    //------------------------------------------------
+
+    wire [7:0] LZA_CNT_comb;
+
+    LZAC u_lzac (
+
+        .Sum(Add_Rslt_mag),
+        .Carry(163'd0),
+
+        .LZA_CNT(LZA_CNT_comb)
+
+    );
+
+    //------------------------------------------------
     // Stage 3 pipeline register → Stage 4
     //------------------------------------------------
 
@@ -197,11 +205,8 @@ module Stage3_Top (
 
         .Add_Rslt_in(Add_Rslt_mag),
         .Result_sign_in(Result_sign_comb),
-        // LZA correction for negative results:
-        // LZAC runs on two's complement form (MSB=1 → LZA=0).
-        // After Complementer+INC the true leading bit is 1 position lower,
-        // so we increment LZA_CNT by 1 when sign=1 to compensate.
-        .LZA_CNT_in(Result_sign_comb ? (LZA_CNT_comb + 8'd1) : LZA_CNT_comb),
+        // LZA correctly computed from magnitude.
+        .LZA_CNT_in(LZA_CNT_comb),
 
         .Prec_in(Prec),
         .Valid_in(Valid),

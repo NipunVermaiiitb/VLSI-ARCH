@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 module addend_alignment_shifter (
 
     input  [55:0]  C_mantissa,
@@ -5,7 +7,11 @@ module addend_alignment_shifter (
     input  [2:0]   Prec,
     input          Para,
 
-    output [162:0] Aligned_C
+    // Two independent aligned C paths:
+    //   Aligned_C_hi = sht_rc1: high-C or C1 (Para/DPDAC) or upper half (DP FMA)
+    //   Aligned_C_lo = sht_rc0: low-C  or C0 (Para/DPDAC) or lower half (DP FMA)
+    output [162:0] Aligned_C_hi,
+    output [162:0] Aligned_C_lo
 
 );
 
@@ -27,44 +33,66 @@ module addend_alignment_shifter (
     wire [7:0] asc_c1 = (asc_c1_raw > 16'd162) ? 8'd162 : asc_c1_raw[7:0];
     wire [7:0] asc_c0 = (asc_c0_raw > 16'd162) ? 8'd162 : asc_c0_raw[7:0];
 
-    //----------------------------------------------------------
-    // Unified C placement (Stage1): ManC is pre-placed left of
-    // product domain, then two parallel shifters align C1/C0.
-    //----------------------------------------------------------
-    wire [162:0] man_c_unified;
-    wire [81:0]  man_c_hi;
-    wire [80:0]  man_c_lo;
-    wire [81:0]  data_pad;
+    reg [162:0] man_c_hi_w;
+    reg [162:0] man_c_lo_w;
 
-    // Keep C on the high side so right-shift aligns down into product region.
-    assign man_c_unified = {C_mantissa, 107'd0};
-    
-    // Para mode: C_mantissa = {C1[27:0], C0[27:0]} - split for independent alignment
-    // Normal mode: single C value in upper path
-    assign man_c_hi = (Para && Prec == DP) ? {C_mantissa[55:28], 54'd0} : man_c_unified[162:81];
-    assign man_c_lo = (Para && Prec == DP) ? {C_mantissa[27:0], 53'd0}  : man_c_unified[80:0];
+    always @(*) begin
+        // By default, zero everything
+        man_c_hi_w = 163'd0;
+        man_c_lo_w = 163'd0;
+        case (Prec)
+            DP: begin
+                // Product MSB at 160. C implicit 1 at 52. Shift: 160 - 52 = 108.
+                man_c_hi_w = {C_mantissa[54:0], 108'd0};
+            end
+            SP: begin
+                // Product MSBs at 102. C implicit 1 at local 23. Shift: 102 - 23 = 79.
+                man_c_hi_w = {56'd0, C_mantissa[55:28], 79'd0};
+                man_c_lo_w = {56'd0, C_mantissa[27:0],  79'd0};
+            end
+            TF32: begin
+                // Product MSBs at 76. C implicit 1 at local 10. Shift: 76 - 10 = 66.
+                man_c_hi_w = {83'd0, C_mantissa[41:28], 66'd0};
+                man_c_lo_w = {83'd0, C_mantissa[13:0],  66'd0};
+            end
+            HP: begin
+                // Product MSB at 76. C implicit 1 at local 10. Shift: 76 - 10 = 66.
+                // HP is a single vector dot product, uses single C (C_lo).
+                man_c_lo_w = {83'd0, C_mantissa[13:0],  66'd0};
+            end
+            BF16: begin
+                // Product MSB at 70. C implicit 1 at local 7. Shift: 70 - 7 = 63.
+                man_c_lo_w = {86'd0, C_mantissa[13:0],  63'd0};
+            end
+            default: ;
+        endcase
+    end
 
-    // From paper flow: DP path can reuse high part as datapad for C0 path (only when Para=0 AND regular DP)
-    // Note: DP Para mode uses independent paths, so no datapad reuse
-    assign data_pad = (Prec == DP && !Para) ? man_c_hi : 82'd0;
+    wire [162:0] man_c_hi = man_c_hi_w;
+    wire [162:0] man_c_lo = man_c_lo_w;
+
+    // DP FMA (single C, Para=0): reuse high path as data_pad so the full
+    // 163-bit C value feeds both shifter stages correctly.
+    // However, since man_c_hi is now a 163-bit vector representing the FULL C,
+    // we don't need a data_pad concatenation.
+    // man_c_hi handles the full width. DP FMA will just use sht_rc1.
 
     //----------------------------------------------------------
-    // Dual alignment shifters controlled by ASC_C1 / ASC_C0
+    // Dual alignment shifters (controlled by ASC_C1 / ASC_C0)
     //----------------------------------------------------------
     wire [162:0] sht_rc1;
     wire [162:0] sht_rc0;
 
-    // Place man_c_hi on the upper side before right-shift so [162:81] slice
-    // retains aligned payload for small/medium ASC values.
-    assign sht_rc1 = ({man_c_hi, 81'd0}) >> asc_c1;
-    assign sht_rc0 = ({data_pad, man_c_lo}) >> asc_c0;
+    assign sht_rc1 = man_c_hi >> asc_c1;
+    assign sht_rc0 = (Prec == DP && !Para) ? (man_c_hi >> asc_c0) : (man_c_lo >> asc_c0);
 
     //----------------------------------------------------------
-    // Merge two aligned paths into one 163-bit addend vector
+    // Output both paths independently.
+    // Stage2_Top decides how to combine them per mode:
+    //   DP FMA (PD_mode, Para=0) : use merged {hi[162:81], lo[80:0]} as one C on one CSA input
+    //   DPDAC  (Para=1 / PD2 / PD4): feed hi→CSA.in3, lo→CSA.in2 independently
     //----------------------------------------------------------
-    assign Aligned_C = {sht_rc1[162:81], sht_rc0[80:0]};
-
-    // Note: sticky generation from shifted-out bits can be added later
-    // by exposing dropped-bit ORs from each shifter level/path.
+    assign Aligned_C_hi = sht_rc1;
+    assign Aligned_C_lo = sht_rc0;
 
 endmodule

@@ -25,9 +25,10 @@ module exponent_comparison (
     parameter DP    = 3'b100;
 
     // Alignment constants for initial ManC vs ManA*ManB placement.
-    parameter signed [13:0] CONST_DP_BASE  = 14'sd2;
-    parameter signed [13:0] CONST_PD2_BASE = 14'sd2;
-    parameter signed [13:0] CONST_PD4_BASE = 14'sd2;
+    parameter signed [13:0] CONST_DP_BASE  = 14'sd0;
+    parameter signed [13:0] CONST_PD2_BASE = 14'sd0;
+    parameter signed [13:0] CONST_PD4_BASE = 14'sd0;
+    parameter signed [13:0] CONST_TF32_BASE = 14'sd0;
 
     // IEEE-754 exponent biases by format.
     parameter [12:0] BIAS_DP   = 13'd1023;

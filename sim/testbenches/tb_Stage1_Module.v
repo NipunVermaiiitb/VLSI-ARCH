@@ -29,14 +29,15 @@ module tb_Stage1_Module;
     wire [31:0]  ExpDiff;
     wire [31:0]  MaxExp;
     wire [63:0]  ProdASC;
-    wire [162:0] Aligned_C;
+    wire [162:0] Aligned_C_hi;
+    wire [162:0] Aligned_C_lo;
     wire [3:0]   Sign_AB;
     wire         Para_reg;
     wire         Cvt_reg;
     wire         PD_mode;
     wire         PD2_mode;
     wire         PD4_mode;
-    wire         valid_out;  // NEW: Added for pipeline control validation
+    wire         valid_out;
 
     integer errors;
     integer tc_start_errors;
@@ -60,7 +61,8 @@ module tb_Stage1_Module;
         .ExpDiff(ExpDiff),
         .MaxExp(MaxExp),
         .ProdASC(ProdASC),
-        .Aligned_C(Aligned_C),
+        .Aligned_C_hi(Aligned_C_hi),
+        .Aligned_C_lo(Aligned_C_lo),
         .Sign_AB(Sign_AB),
         .Para_reg(Para_reg),
         .Cvt_reg(Cvt_reg),
@@ -84,18 +86,20 @@ module tb_Stage1_Module;
         begin
             $display("\n=== %s ===", test_name);
             $display("Observed summary: valid_out=%b Sign_AB[0]=%b pp_nonzero=%b alignedC_nonzero=%b",
-                     valid_out, Sign_AB[0], (partial_products != 112'd0), (Aligned_C != 163'd0));
+                     valid_out, Sign_AB[0], (partial_products != 112'd0),
+                     (Aligned_C_hi != 163'd0) || (Aligned_C_lo != 163'd0));
             $display("Mode bits: PD=%b PD2=%b PD4=%b | Para_reg=%b Cvt_reg=%b",
                      PD_mode, PD2_mode, PD4_mode, Para_reg, Cvt_reg);
             if (VERBOSE) begin
                 $display("partial_products_sum   = %h", partial_products_sum);
                 $display("partial_products_carry = %h", partial_products_carry);
                 $display("partial_products(add)  = %h", partial_products);
-                $display("ExpDiff = %h (asc_c1=%d, asc_c0=%d)", 
+                $display("ExpDiff = %h (asc_c1=%d, asc_c0=%d)",
                          ExpDiff, ExpDiff[31:16], ExpDiff[15:0]);
                 $display("MaxExp  = %h (exp_c_max=%d, exp_ab_max=%d)",
                          MaxExp, MaxExp[31:16], MaxExp[15:0]);
-                $display("Aligned_C = %h", Aligned_C);
+                $display("Aligned_C_hi = %h", Aligned_C_hi);
+                $display("Aligned_C_lo = %h", Aligned_C_lo);
                 $display("Sign_AB = %b", Sign_AB);
             end
         end
@@ -174,26 +178,27 @@ module tb_Stage1_Module;
         B_in  = 64'h4000_0000_0000_0000;  // 2.0
         C_in  = 64'h3FE0_0000_0000_0000;  // 0.5
         begin_case("TC7.1 DP 1.5*2.0 + 0.5", "valid_out 0->1 over 2 cycles, Sign_AB[0]=0, non-zero DP datapath activity");
-        
-        @(posedge clk);  // Cycle 0: Inputs accepted (cnt=0), valid_out=0
+
+        @(posedge clk);  // Input register stage (inputs sampled here)
+        @(posedge clk);  // Cycle 0: cnt=0 registered, valid_out=0
         #1;
         $display("Cycle 0: cnt=0, inputs loaded, valid_out=%b (expect 0)", valid_out);
         if (valid_out !== 1'b0) begin
             $display("ERROR: valid_out should be 0 in DP cycle 0!");
             errors = errors + 1;
         end
-        
-        @(posedge clk);  // Cycle 1: DP multiply completes (cnt=1), valid_out=1
+
+        @(posedge clk);  // Cycle 1: DP complete, cnt=1 registered, valid_out=1
         #1;
         $display("Cycle 1: cnt=1, DP complete, valid_out=%b (expect 1)", valid_out);
         if (valid_out !== 1'b1) begin
             $display("ERROR: valid_out should be 1 in DP cycle 1!");
             errors = errors + 1;
         end
-        
+
         display_outputs("TC7.1 Results After DP 2-Cycle Multiply");
         $display("Expected: Sign_AB[0]=0 (positive), non-zero products, aligned C");
-        
+
         if (Sign_AB[0] !== 1'b0) begin
             $display("ERROR: Sign[0] should be 0 (positive)!");
             errors = errors + 1;
@@ -206,16 +211,17 @@ module tb_Stage1_Module;
         B_in  = 64'h4008_0000_0000_0000;  // 3.0
         C_in  = 64'h3FF0_0000_0000_0000;  // 1.0
         begin_case("TC7.1b DP second operation", "same DP 2-cycle behavior; validates counter phase continuity");
-        
-        @(posedge clk);  // Cycle 0: New inputs accepted (cnt=0), valid_out=0
+
+        @(posedge clk);  // Input register stage
+        @(posedge clk);  // Cycle 0: cnt=0, valid_out=0
         #1;
         $display("Cycle 0: New inputs, valid_out=%b (expect 0)", valid_out);
         if (valid_out !== 1'b0) begin
             $display("ERROR: valid_out should be 0 for second DP operation cycle 0!");
             errors = errors + 1;
         end
-        
-        @(posedge clk);  // Cycle 1: Second DP completes (cnt=1), valid_out=1
+
+        @(posedge clk);  // Cycle 1: cnt=1, valid_out=1
         #1;
         $display("Cycle 1: Second DP complete, valid_out=%b (expect 1)", valid_out);
         if (valid_out !== 1'b1) begin
@@ -251,36 +257,43 @@ module tb_Stage1_Module;
         end_case("TC7.2 SP dual lane");
 
         // TC7.3: HP Mode - Quad Lane
+        // NOTE: In HP mode, A/B are 4-lane HP (14-bit segments), but C is ALWAYS SP format.
+        // C_in[63:32] = upper SP value, C_in[31:0] = lower SP value.
         $display("\n=== TC7.3: HP Mode - Quad Lane ===");
         Prec  = HP;
         Para  = 0;
         Cvt   = 0;
-        
-        // Pack four HP values in 14-bit segments
+        A_in  = 64'd0;
+        B_in  = 64'd0;
+        C_in  = 64'd0;
+
+        // Pack four HP values in 14-bit A/B segments (component_formatter packs segments 55:42, 41:28, 27:14, 13:0)
         A_in[55:42] = 14'h0F00;  // ~1.0 HP
         A_in[41:28] = 14'h1000;  // ~2.0 HP
         A_in[27:14] = 14'h0E00;  // ~0.5 HP
         A_in[13:0]  = 14'h0F80;  // ~1.5 HP
-        
+
         B_in[55:42] = 14'h1000;  // ~2.0 HP
         B_in[41:28] = 14'h0F00;  // ~1.0 HP
         B_in[27:14] = 14'h1000;  // ~2.0 HP
         B_in[13:0]  = 14'h1000;  // ~2.0 HP
-        
-        C_in[55:42] = 14'h0E00;  // ~0.5 HP
-        C_in[41:28] = 14'h0F00;  // ~1.0 HP
-        C_in[27:14] = 14'h0000;  // 0.0 HP
-        C_in[13:0]  = 14'h0F00;  // ~1.0 HP
-        begin_case("TC7.3 HP quad lane", "PD4_mode=1 and four lane outputs should map correctly");
-        
+
+        // C is SP format: two 32-bit SP values.
+        // C[63:32] = 1.0f SP = 32'h3F800000
+        // C[31:0]  = 0.5f SP = 32'h3F000000
+        C_in[63:32] = 32'h3F80_0000;  // 1.0 SP (high addend)
+        C_in[31:0]  = 32'h3F00_0000;  // 0.5 SP (low addend)
+
+        begin_case("TC7.3 HP quad lane", "PD4_mode=1, four 28-bit AB products, C treated as SP (two lanes)");
+
         @(posedge clk);
         @(posedge clk);
         @(posedge clk);
         #1;
-        
+
         display_outputs("TC7.3 Results HP Quad Lane");
-        $display("Expected: PD4_mode=1, four 28-bit products");
-        
+        $display("Expected: PD4_mode=1, four 28-bit products, C as SP (BIAS_SP used for C exponent)");
+
         if (!PD4_mode) begin
             $display("ERROR: PD4_mode should be active!");
             errors = errors + 1;
@@ -381,27 +394,43 @@ module tb_Stage1_Module;
         end_case("TC7.7 Para/Cvt pass-through");
 
         // TC7.8: BF16 Mode
+        // NOTE: In BF16 mode, A/B are 4-lane BF16 (14-bit segments), but C is ALWAYS SP format.
         $display("\n=== TC7.8: BF16 Mode - Quad Lane ===");
         Prec  = BF16;
         Para  = 0;
         Cvt   = 0;
-        
+        A_in  = 64'd0;
+        B_in  = 64'd0;
+        C_in  = 64'd0;
+
+        // Pack four BF16 values in 14-bit A/B segments
         A_in[55:42] = 14'h0FE0;  // ~1.0 BF16
         A_in[41:28] = 14'h1000;  // ~2.0 BF16
         A_in[27:14] = 14'h0FC0;  // ~0.5 BF16
         A_in[13:0]  = 14'h0FF0;  // ~1.5 BF16
-        
+
         B_in = A_in;
-        C_in = A_in;
-        begin_case("TC7.8 BF16 quad lane", "PD4_mode=1 and lane products should be visible");
-        
+
+        // C is SP format (NOT BF16 segments): two 32-bit SP values.
+        // C[63:32] = 2.0f SP = 32'h40000000
+        // C[31:0]  = 1.0f SP = 32'h3F800000
+        C_in[63:32] = 32'h4000_0000;  // 2.0 SP (high addend)
+        C_in[31:0]  = 32'h3F80_0000;  // 1.0 SP (low addend)
+
+        begin_case("TC7.8 BF16 quad lane", "PD4_mode=1, four BF16 AB products, C treated as SP (two lanes)");
+
         @(posedge clk);
         @(posedge clk);
         @(posedge clk);
         #1;
-        
+
         display_outputs("TC7.8 BF16 Mode");
-        $display("Expected: PD4_mode=1");
+        $display("Expected: PD4_mode=1, C exponent decoded with BIAS_SP");
+
+        if (!PD4_mode) begin
+            $display("ERROR: PD4_mode should be active for BF16!");
+            errors = errors + 1;
+        end
         end_case("TC7.8 BF16 quad lane");
 
         // TC7.9: TF32 Mode
@@ -491,28 +520,28 @@ module tb_Stage1_Module;
         C_in[63:32] = 32'h4040_0000;  // C1 = 3.0 SP (sign=0, exp=128)
         C_in[31:0]  = 32'h3F80_0000;  // C0 = 1.0 SP (sign=0, exp=127)
         begin_case("TC7.12 DP Para dual-addend", "valid_out 0->1, Para_reg=1, and Aligned_C carries both C1/C0 contributions");
-        
-        @(posedge clk);  // Cycle 0: Inputs accepted, valid_out=0 (cnt==0, valid_out=~0=0)
+
+        @(posedge clk);  // Input register stage (inputs sampled)
+        @(posedge clk);  // Cycle 0: cnt=0 registered, valid_out=0
         #1;
         $display("Cycle 0: Para mode, inputs loaded, valid_out=%b (expect 0)", valid_out);
         if (valid_out !== 1'b0) begin
             $display("ERROR: valid_out should be 0 in Para DP cycle 0!");
             errors = errors + 1;
         end
-        
-        @(posedge clk);  // Cycle 1: DP multiply completes, valid_out=1 (cnt==1, valid_out=~1=0... wait)
+
+        @(posedge clk);  // Cycle 1: cnt=1 registered, valid_out=1
         #1;
-        // Note: At this point cnt has toggled, so valid_out should have updated in the register
         $display("Cycle 1: Para mode complete, valid_out=%b (expect 1)", valid_out);
         if (valid_out !== 1'b1) begin
             $display("ERROR: valid_out should be 1 in Para DP cycle 1!");
             errors = errors + 1;
         end
-        
+
         display_outputs("TC7.12 Results Para Mode");
         $display("Expected: Para_reg=1, C formatted as dual SP addends");
         $display("Expected: Aligned_C contains both C1 and C0 independently aligned");
-        
+
         if (Para_reg !== 1'b1) begin
             $display("ERROR: Para_reg should be 1!");
             errors = errors + 1;

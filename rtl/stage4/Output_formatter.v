@@ -147,25 +147,25 @@ module Output_Formatter (
     wire [15:0] exp_raw = MaxExp[15:0];  // biased MaxExp from Stage1 exponent_comparison
 
     // ACCUM_OFFSET: structural constant accounting for the fixed distance between
-    // MaxExp's assumed implicit-bit position and its actual position in the accumulator.
-    // Empirically calibrated per mode from simulation:
-    //   DP  : product at ~bit 161 → LZA=1 for unit product → offset = 1
-    //   SP  : product at ~bit 154 → LZA=8 for unit product → offset = 8
-    //   TF32: similar structure to HP (14-bit effective)   → offset = 6
-    //   HP  : product at ~bit 156 → LZA=6 for unit product → offset = 6
-    //   BF16: product at ~bit 150 → LZA=12 for unit product → offset = 12
-    wire [15:0] accum_offset = (Prec == DP)   ? 16'd1  :
-                               (Prec == SP)   ? 16'd8  :
-                               (Prec == TF32) ? 16'd6  :
-                               (Prec == HP)   ? 16'd6  :
-                               (Prec == BF16) ? 16'd12 : 16'd1;
+    // the accumulator's implicit-bit position (bit 162 after normalization) and
+    // the position that corresponds to the biased MaxExp from Stage1.
+    //
+    // DP:   product leading bit lands at ~bit 160 of the 163-bit accumulator
+    //        (= 56-bit zero pad lower bound ignored; actual position from sim)
+    //        LZA shifts it to bit 162 (LZA_CNT≈2 for unit product).
+    reg [7:0] accum_offset;
+    always @(*) begin
+        case (Prec)
+            DP: accum_offset = 8'd2;
+            SP: accum_offset = 8'd8;
+            TF32: accum_offset = 8'd6;
+            HP: accum_offset = 8'd2;
+            BF16: accum_offset = 8'd2;
+            default: accum_offset = 8'd0;
+        endcase
+    end
 
-    wire [15:0] exp_adj = exp_raw
-                        - {8'd0, LZA_CNT}
-                        + {15'd0, overflow_flag}
-                        + {15'd0, rnd_carry}
-                        + accum_offset;
-
+    wire [15:0] exp_adj = exp_raw - {8'd0, LZA_CNT} + {8'd0, accum_offset} + {15'd0, overflow_flag} + {15'd0, rnd_carry};
 
     //----------------------------------------------------------
     // Special value detection

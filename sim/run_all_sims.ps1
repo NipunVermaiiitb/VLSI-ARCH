@@ -36,7 +36,6 @@ $RTL_S1 = @(
     "$RTL\stage1\exponent_comparison.v",
     "$RTL\stage1\addend_alignment_shifter.v",
     "$RTL\stage1\sign_logic.v",
-    "$RTL\stage1\Stage1_pipeline_register.v",
     "$RTL\stage1\Input_Register_Module.v"
 )
 

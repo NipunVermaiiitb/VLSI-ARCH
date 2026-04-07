@@ -156,6 +156,17 @@ module tb_DPDAC_top;
         else                     $display("  TC-DPDAC-3: FAIL");
 
         // ----------------------------------------------------------
+        // TC-DPDAC-9: DP 1.0*1.0+1.0 = 2.0
+        // ----------------------------------------------------------
+        tc_errors = errors;
+        $display("\n--- TC-DPDAC-9: DP 1.0*1.0+1.0 = 2.0 ---");
+        drive_and_wait(64'h3FF0000000000000, 64'h3FF0000000000000, 64'h3FF0000000000000, DP, 0, 0, DP_LATENCY);
+        $display("  Result_out   = 0x%016h", Result_out);
+        check("DP_2.0", (Result_out === 64'h4000000000000000), "DP: 1.0*1.0+1.0 should be 2.0");
+        if (errors == tc_errors) $display("  TC-DPDAC-9: PASS");
+        else                     $display("  TC-DPDAC-9: FAIL");
+
+        // ----------------------------------------------------------
         // TC-DPDAC-4: SP dual-lane
         //   Lane high [63:32]: A=1.5f, B=2.0f, C=0.5f → 3.5f (0x40600000)
         //   Lane low  [31:0]:  A=2.0f, B=0.5f, C=1.0f → 2.0f (0x40000000)

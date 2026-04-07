@@ -56,8 +56,9 @@ module DPDAC_top (
     wire [111:0] pp_sum_s1, pp_carry_s1;
     wire [31:0]  ExpDiff_s1, MaxExp_s1;
     wire [63:0]  ProdASC_s1;
-    wire [162:0] Aligned_C_s1;
+    wire [162:0] Aligned_C_hi_s1, Aligned_C_lo_s1;   // dual C paths from Stage1
     wire [3:0]   Sign_AB_s1;
+    wire [3:0]   Sign_C_s1;
     wire         Para_s1, Cvt_s1, valid_s1;
     wire         PD_mode_s1, PD2_mode_s1, PD4_mode_s1;
 
@@ -81,8 +82,10 @@ module DPDAC_top (
         .MaxExp                (MaxExp_s1),
         .ProdASC               (ProdASC_s1),
 
-        .Aligned_C             (Aligned_C_s1),
+        .Aligned_C_hi          (Aligned_C_hi_s1),
+        .Aligned_C_lo          (Aligned_C_lo_s1),
         .Sign_AB               (Sign_AB_s1),
+        .Sign_C                (Sign_C_s1),
 
         .Para_reg              (Para_s1),
         .Cvt_reg               (Cvt_s1),
@@ -144,9 +147,12 @@ module DPDAC_top (
         .MaxExp_s1          (MaxExp_s1),
         .ProdASC_s1         (ProdASC_s1),
 
-        .Aligned_C_s1       (Aligned_C_s1),
+        .Aligned_C_hi_s1    (Aligned_C_hi_s1),
+        .Aligned_C_lo_s1    (Aligned_C_lo_s1),
+        .Para_s1            (Para_s1),
 
         .Sign_AB_s1         (Sign_AB_s1),
+        .Sign_C_s1          (Sign_C_s1),
 
         .Prec_s1            (Prec_s1_wire),
         .Valid_s1           (Valid_s1_wire),

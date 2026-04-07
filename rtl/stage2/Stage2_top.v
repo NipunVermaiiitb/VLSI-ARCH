@@ -12,9 +12,13 @@ module Stage2_Top (
     input  [31:0]  MaxExp_s1,
     input  [63:0]  ProdASC_s1,
 
-    input  [162:0] Aligned_C_s1,
+    // Two independent aligned C paths from addend_alignment_shifter
+    input  [162:0] Aligned_C_hi_s1,   // sht_rc1
+    input  [162:0] Aligned_C_lo_s1,   // sht_rc0
+    input          Para_s1,            // Para flag (registered from Stage1)
 
     input  [3:0]   Sign_AB_s1,
+    input  [3:0]   Sign_C_s1,
 
     input  [2:0]   Prec_s1,
     input  [3:0]   Valid_s1,
@@ -43,7 +47,7 @@ module Stage2_Top (
 );
 
     //------------------------------------------------
-    // Direct wire assignments (Stage1_Module already has pipeline register)
+    // Direct wire assignments
     //------------------------------------------------
 
     wire [111:0] partial_products = partial_products_s1;
@@ -51,7 +55,17 @@ module Stage2_Top (
     wire [31:0]  MaxExp           = MaxExp_s1;
     wire [63:0]  ProdASC          = ProdASC_s1;
 
-    wire [162:0] Aligned_C        = Aligned_C_s1;
+    // C routing:
+    // DP FMA (PD_mode=1, Para=0): recombine hi/lo into a single 163-bit C on one input,
+    //   zero the other input. The addend_alignment_shifter splits single C into a hi half
+    //   (bits[162:81]) via sht_rc1 and a lo half (bits[80:0]) via sht_rc0.
+    // DPDAC / Para=1 / PD2 / PD4: feed hi and lo independently as two addends.
+    wire [162:0] Aligned_C_dual_raw = (Prec_s1 == 3'b100 && Para_s1 == 0) ? Aligned_C_lo_s1 : Aligned_C_lo_s1;
+    wire [162:0] Aligned_C_high_raw = (Prec_s1 == 3'b100 && Para_s1 == 0) ? 163'd0 : Aligned_C_hi_s1;
+
+    // Apply two's complement inversion for negative C addends
+    wire [162:0] Aligned_C_dual = Sign_C_s1[0] ? (~Aligned_C_dual_raw + 163'd1) : Aligned_C_dual_raw;
+    wire [162:0] Aligned_C_high = Sign_C_s1[1] ? (~Aligned_C_high_raw + 163'd1) : Aligned_C_high_raw;
 
     wire [3:0]   Sign_AB          = Sign_AB_s1;
 
@@ -143,12 +157,21 @@ module Stage2_Top (
 
     );
 
+    reg [31:0] dbg_cnt2 = 0;
+    always @(posedge clk) begin
+        if (Prec_s1 == 3'b100 && Valid_s1 == 4'b1111 && Para_s1 == 0) begin
+            $display("[DEBUG S2 %d] cnt0=%b signed_p0[161:159]=%b, C_dual[161:159]=%b, C_hi_s1[161:159]=%b, C_lo_s1[161:159]=%b, asc_c1=%d asc_c0=%d",
+                     dbg_cnt2, (Sum_s2[0] ^ Sum_s2[0]), signed_p0[161:159], Aligned_C_dual[161:159], Aligned_C_hi_s1[161:159], Aligned_C_lo_s1[161:159], ExpDiff_s1[31:16], ExpDiff_s1[15:0]);
+        end
+        dbg_cnt2 <= dbg_cnt2 + 1;
+    end
+
     //------------------------------------------------
-    // Forward C operand
+    // Forward C operand paths to Stage 3 pipeline register
     //------------------------------------------------
 
-    assign Aligned_C_dual_s2 = Aligned_C;
-    assign Aligned_C_high_s2 = Aligned_C;
+    assign Aligned_C_dual_s2 = Aligned_C_dual;
+    assign Aligned_C_high_s2 = Aligned_C_high;
 
     //------------------------------------------------
     // Forward control signals to Stage 3

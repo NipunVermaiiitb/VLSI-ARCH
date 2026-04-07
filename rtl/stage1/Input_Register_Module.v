@@ -28,8 +28,9 @@ module Stage1_Module (
     output reg [31:0]  MaxExp,
     output reg [63:0]  ProdASC,    // Product alignment shift counts for Stage 2
 
-    // Aligned C output
-    output reg [162:0] Aligned_C,
+    // Aligned C: two independent paths (hi=sht_rc1, lo=sht_rc0)
+    output reg [162:0] Aligned_C_hi,
+    output reg [162:0] Aligned_C_lo,
 
     // Product sign
     output reg [3:0]   Sign_AB,
@@ -193,14 +194,16 @@ module Stage1_Module (
     );
 
     // Addend Alignment Shifter
-    wire [162:0] Aligned_C_w;
+    wire [162:0] Aligned_C_hi_w;
+    wire [162:0] Aligned_C_lo_w;
 
     addend_alignment_shifter u_align (
         .C_mantissa(C_mant_ext),
         .ExpDiff(ExpDiff_w),
         .Prec(Prec_reg),
         .Para(Para_reg_int),
-        .Aligned_C(Aligned_C_w)
+        .Aligned_C_hi(Aligned_C_hi_w),
+        .Aligned_C_lo(Aligned_C_lo_w)
     );
 
     // Sign Logic
@@ -215,6 +218,7 @@ module Stage1_Module (
 
     //----------------------------------------------------------
     // Stage 1 Pipeline Register
+    // (Stage1_pipeline_register.v is not used — register is inline here)
     //----------------------------------------------------------
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -223,7 +227,8 @@ module Stage1_Module (
             ExpDiff          <= 32'd0;
             MaxExp           <= 32'd0;
             ProdASC          <= 64'd0;
-            Aligned_C        <= 163'd0;
+            Aligned_C_hi     <= 163'd0;
+            Aligned_C_lo     <= 163'd0;
             Sign_AB          <= 4'd0;
             Sign_C           <= 4'd0;  
             Para_reg         <= 1'b0;
@@ -236,17 +241,21 @@ module Stage1_Module (
             ExpDiff          <= ExpDiff_w;
             MaxExp           <= MaxExp_w;
             ProdASC          <= ProdASC_w;
-            Aligned_C        <= Aligned_C_w;
+            Aligned_C_hi     <= Aligned_C_hi_w;
+            Aligned_C_lo     <= Aligned_C_lo_w;
             Sign_AB          <= Sign_AB_w;
             Sign_C           <= C_sign_raw;
             Para_reg         <= Para_reg_int;
             Cvt_reg          <= Cvt_reg_int;
-            
-            // Valid output masking (deterministic latency)
-            // DP mode: output valid only on cycle 1 (when cnt==1 → Cnt0=1 → gsum1 is the product)
-            // cycle 0 (cnt=0): saving intermediate, partial_sum=0 → valid=0
-            // cycle 1 (cnt=1): product ready,       partial_sum=gsum1 → valid=1
-            // Other modes: output valid every cycle
+            // valid_out: in DP mode the product is ready on the cycle when cnt==1
+            // (multiplier outputs gsum1 on cnt=1). cnt is captured in a register
+            // so at posedge when cnt transitions: the OLD value is used because
+            // always blocks see pre-edge values of variables in blocking order.
+            // We use cnt directly: after posedge, valid_out holds cnt's pre-edge value.
+            // cnt starts at 0 after reset, goes 1→0→1... So:
+            //   posedge when cnt was 0 → valid_out<=0 (DP cycle 0, not ready)
+            //   posedge when cnt was 1 → valid_out<=1 (DP cycle 1, ready)
+            // This is correct.
             valid_out <= (Prec_reg == DP) ? cnt : 1'b1;
         end
     end

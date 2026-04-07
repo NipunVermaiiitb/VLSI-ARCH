@@ -30,8 +30,10 @@ module tb_integration_stage1_stage2;
     wire [63:0]  s1_ProdASC;
     wire [31:0]  s1_ExpDiff;
     wire [31:0]  s1_MaxExp;
-    wire [162:0] s1_Aligned_C;
+    wire [162:0] s1_Aligned_C_hi;
+    wire [162:0] s1_Aligned_C_lo;
     wire [3:0]   s1_Sign_AB;
+    wire         s1_Para_reg;
     wire         s1_valid_out;
     wire         s1_PD_mode;
     wire         s1_PD2_mode;
@@ -51,8 +53,10 @@ module tb_integration_stage1_stage2;
         .ProdASC(s1_ProdASC),
         .ExpDiff(s1_ExpDiff),
         .MaxExp(s1_MaxExp),
-        .Aligned_C(s1_Aligned_C),
+        .Aligned_C_hi(s1_Aligned_C_hi),
+        .Aligned_C_lo(s1_Aligned_C_lo),
         .Sign_AB(s1_Sign_AB),
+        .Para_reg(s1_Para_reg),
         .valid_out(s1_valid_out),
         .PD_mode(s1_PD_mode),
         .PD2_mode(s1_PD2_mode),
@@ -81,7 +85,9 @@ module tb_integration_stage1_stage2;
         .ExpDiff_s1(s1_ExpDiff),
         .MaxExp_s1(s1_MaxExp),
         .ProdASC_s1(s1_ProdASC),
-        .Aligned_C_s1(s1_Aligned_C),
+        .Aligned_C_hi_s1(s1_Aligned_C_hi),
+        .Aligned_C_lo_s1(s1_Aligned_C_lo),
+        .Para_s1(s1_Para_reg),
         .Sign_AB_s1(s1_Sign_AB),
         .Prec_s1(s1_Prec),
         .Valid_s1(s2_Valid_in),
@@ -299,11 +305,13 @@ module tb_integration_stage1_stage2;
         
         repeat (3) @(posedge clk);
         
-        $display("S1 Aligned_C[41:0]=%h (addend C mantissa aligned)",
-                 s1_Aligned_C[41:0]);
+        $display("S1 Aligned_C_hi[41:0]=%h (addend C high path)",
+                 s1_Aligned_C_hi[41:0]);
+        $display("S1 Aligned_C_lo[41:0]=%h (addend C low  path)",
+                 s1_Aligned_C_lo[41:0]);
         $display("S2 Aligned_C_dual[41:0]=%h", s2_Aligned_C_dual[41:0]);
         $display("S2 Aligned_C_high[41:0]=%h", s2_Aligned_C_high[41:0]);
-        
+
         if ((s2_Aligned_C_dual === 163'd0) && (s2_Aligned_C_high === 163'd0)) begin
             $display("WARNING: Both S2 Aligned_C paths zero (verify alignment logic)");
         end
