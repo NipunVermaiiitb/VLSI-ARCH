@@ -1,12 +1,10 @@
-module Final_Adder (
+module Final_Adder_108bit (
+    input  [107:0] A,
+    input  [107:0] B,
+    input          Cin,
 
-    input  [162:0] A,
-    input  [162:0] B,
-
-    output [162:0] SUM
-
+    output [107:0] SUM,
+    output         Cout
 );
-
-assign SUM = A + B;
-
+    assign {Cout, SUM} = A + B + Cin;
 endmodule

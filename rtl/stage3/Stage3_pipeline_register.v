@@ -8,8 +8,8 @@ module Stage3_Pipeline_Register (
     //------------------------------------
 
     input  [162:0] Add_Rslt_in,
-    input          Result_sign_in,
-    input  [7:0]   LZA_CNT_in,
+    input  [3:0]   Result_sign_in,
+    input  [15:0]   LZA_CNT_in,
 
     input  [2:0]   Prec_in,
     input  [3:0]   Valid_in,
@@ -19,8 +19,8 @@ module Stage3_Pipeline_Register (
     //------------------------------------
 
     output reg [162:0] Add_Rslt_out,
-    output reg         Result_sign_out,
-    output reg [7:0]   LZA_CNT_out,
+    output reg [3:0]   Result_sign_out,
+    output reg [15:0]   LZA_CNT_out,
 
     output reg [2:0]   Prec_out,
     output reg [3:0]   Valid_out
@@ -32,7 +32,7 @@ always @(posedge clk or negedge rst_n) begin
     if(!rst_n) begin
 
         Add_Rslt_out <= 0;
-        Result_sign_out <= 0;
+        Result_sign_out <= 4'd0;
         LZA_CNT_out <= 0;
 
         Prec_out <= 0;

@@ -74,11 +74,20 @@ vvp "sim\bin\sim_full.vvp"
 ```
 
 ### Verification Status
-The design has been verified to pass 7/7 comprehensive integration tests:
-1. **DP Normal**: 1.5 * 2.0 + 0.5 = 3.5
-2. **DP Negative**: -1.5 * 2.0 = -3.0
-3. **DP Zero**: 0.0 * 2.0 = 0.0
-4. **SP Dual-Lane**: Structural check for two-lane SP throughput
-5. **HP Quad-Lane**: Structural check for four-lane HP throughput
-6. **BF16 Quad-Lane**: Structural check for four-lane BF16 throughput
-7. **Back-to-Back DP**: Verifies pipeline ordering and hazard-free DP execution
+The full integration testbench has been verified for **13/13 cases passing**:
+1. **TC1 DP Normal**: 1.5 * 2.0 + 0.5 = 3.5
+2. **TC2 DP Negative**: -1.5 * 2.0 + 0.0 = -3.0
+3. **TC3 DP Zero**: 0.0 * 2.0 + 0.0 = 0.0
+4. **TC4 SP Dual-Lane Structural**: Valid/sign/structural behavior
+5. **TC5 HP Quad-Lane Structural**: Valid/sign/structural behavior
+6. **TC6 BF16 Quad-Lane Structural**: Valid/sign/structural behavior
+7. **TC7 Back-to-Back DP**: Pipeline ordering and hazard-free execution
+8. **TC8 DP C-only +1.0**: Addend passthrough
+9. **TC9 DP C-only -1.0**: Addend passthrough with sign
+10. **TC10 DP C-only +0.5**: Fractional addend passthrough
+11. **TC11 SP Exact Dual-Lane**: Exact lane numeric check
+12. **TC12 BF16 Exact Quad-Lane**: Exact lane numeric check
+13. **TC13 TF32 Exact Dual-Lane**: Exact lane numeric check
+
+Final summary from the full testbench:
+- **ALL TESTS PASSED (13/13)**

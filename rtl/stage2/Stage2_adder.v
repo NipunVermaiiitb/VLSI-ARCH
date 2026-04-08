@@ -1,92 +1,53 @@
 module Stage2_Adder (
+    input [107:0] unified_product_108,
+    input         PD4_mode,
+    input         PD2_mode,
 
-    input  [111:0] partial_products_sum,
-    input  [111:0] partial_products_carry,
-
-    input          PD_mode,
-    input          PD2_mode,
-    input          PD4_mode,
-
-    output [106:0] product0,
-    output [106:0] product1,
-    output [106:0] product2,
-    output [106:0] product3
-
+    output [58:0] sum,
+    output [58:0] carry
 );
 
-    // ------------------------------------------------------------
-    // Local 56-bit 3:2 CSA row compressor.
-    // sum + carry is equivalent to x + y + z.
-    // ------------------------------------------------------------
-    function [111:0] csa3_56;
-        input [55:0] x;
-        input [55:0] y;
-        input [55:0] z;
-        reg   [55:0] s;
-        reg   [55:0] c;
-        begin
-            s = x ^ y ^ z;
-            c = ((x & y) | (x & z) | (y & z)) << 1;
-            csa3_56 = {s, c};
-        end
-    endfunction
+    //---------------------------------------------------------
+    // 1. Path for PD4 (4-term): 4 x 27-bit -> 4-to-2 CSA
+    //---------------------------------------------------------
+    // In PD4, we only use the lower 27-30 bits of the logic.
+    wire [29:0] pd4_pp0 = {3'b0, unified_product_108[26:0]};
+    wire [29:0] pd4_pp1 = {3'b0, unified_product_108[53:27]};
+    wire [29:0] pd4_pp2 = {3'b0, unified_product_108[80:54]};
+    wire [29:0] pd4_pp3 = {3'b0, unified_product_108[107:81]};
 
-    // Stage1 already generated carry-save rows with a 4:2 compressor.
-    // Keep both rows visible in Stage2 instead of collapsing early.
-    wire [111:0] cs_sum   = partial_products_sum;
-    wire [111:0] cs_carry = partial_products_carry;
+    wire [29:0] s42, c42;
+    assign s42 = pd4_pp0 ^ pd4_pp1 ^ pd4_pp2 ^ pd4_pp3;
+    assign c42 = ((pd4_pp0 & pd4_pp1) | (pd4_pp2 & pd4_pp3) | ((pd4_pp0^pd4_pp1)&(pd4_pp2^pd4_pp3))) << 1;
 
-    // DP is a single wide product path, so keep the full-width collapse.
-    wire [111:0] pp_cpa_dp = cs_sum + cs_carry;
+    //---------------------------------------------------------
+    // 2. Path for PD2 (2-term): 2 x 54-bit -> 4:2 + 3:2 CSA
+    //---------------------------------------------------------
+    // PP1 (bits 53:0) and PP3 (bits 107:54)
+    wire [29:0] pd2_pp1_lo = unified_product_108[29:0];
+    wire [29:0] pd2_pp3_lo = unified_product_108[83:54]; // bits 0-29 of PP3
 
-    // PD2 path: combine Stage1 4:2 rows with a Stage2 3:2 per 56-bit lane.
-    wire [111:0] pd2_lo_rows = csa3_56(cs_sum[55:0],   cs_carry[55:0],   56'd0);
-    wire [111:0] pd2_hi_rows = csa3_56(cs_sum[111:56], cs_carry[111:56], 56'd0);
+    wire [28:0] pd2_pp1_hi = unified_product_108[53:30];
+    wire [28:0] pd2_pp3_hi = unified_product_108[107:84]; // bits 30-53 of PP3
 
-    // Final lane-local collapse (no carry propagation across lane boundaries).
-    wire [55:0] pd2_lo_mag = pd2_lo_rows[111:56] + pd2_lo_rows[55:0];
-    wire [55:0] pd2_hi_mag = pd2_hi_rows[111:56] + pd2_hi_rows[55:0];
+    // Lower Segment (4-to-2 used as 2-input adder)
+    wire [29:0] s_lo = pd2_pp1_lo ^ pd2_pp3_lo;
+    wire [29:0] c_lo = (pd2_pp1_lo & pd2_pp3_lo) << 1;
 
-    wire [27:0] pd4_lane0_mag = cs_sum[27:0]    + cs_carry[27:0];
-    wire [27:0] pd4_lane1_mag = cs_sum[55:28]   + cs_carry[55:28];
-    wire [27:0] pd4_lane2_mag = cs_sum[83:56]   + cs_carry[83:56];
-    wire [27:0] pd4_lane3_mag = cs_sum[111:84]  + cs_carry[111:84];
+    // The Bridge: 1-bit Cin generated from the carry out of bit 29
+    // In a CSA, the carry bit at index N is the carry INTO index N+1.
+    wire pd2_cin = c_lo[29];
 
-    // Unpack the Stage-1 product bus into mode-dependent magnitudes.
-    reg [107:0] mag0;
-    reg [107:0] mag1;
-    reg [107:0] mag2;
-    reg [107:0] mag3;
+    // Upper Segment (3-to-2 CSA)
+    // x = PP1_hi, y = PP3_hi, z = Bridge Carry
+    wire [28:0] s_hi, c_hi;
+    assign s_hi = pd2_pp1_hi ^ pd2_pp3_hi ^ {28'b0, pd2_cin};
+    assign c_hi = ((pd2_pp1_hi & pd2_pp3_hi) | (pd2_pp1_hi & {28'b0, pd2_cin}) | (pd2_pp3_hi & {28'b0, pd2_cin})) << 1;
 
-    always @(*) begin
-        mag0 = 108'd0;
-        mag1 = 108'd0;
-        mag2 = 108'd0;
-        mag3 = 108'd0;
-
-        if (PD_mode) begin
-            // DP: bypass Stage2 product compression.
-            mag0 = pp_cpa_dp[107:0];
-        end
-        else if (PD2_mode) begin
-            // PD2 (SP/TF32): Stage1 4:2 rows + Stage2 3:2 finalize two 56-bit products.
-            // Place at HIGH side of 108-bit magnitude so alignment keeps MSB near bit 163.
-            mag0 = {pd2_lo_mag,  52'd0};
-            mag1 = {pd2_hi_mag, 52'd0};
-        end
-        else begin  // PD4_mode (HP/BF16)
-            // PD4: use only Stage1 4:2 rows, then finalize each 28-bit lane independently.
-            mag0 = {pd4_lane0_mag, 80'd0};
-            mag1 = {pd4_lane1_mag, 80'd0};
-            mag2 = {pd4_lane2_mag, 80'd0};
-            mag3 = {pd4_lane3_mag, 80'd0};
-        end
-    end
-
-    // Output unsigned magnitudes (sign will be applied AFTER alignment)
-    assign product0 = mag0[106:0];
-    assign product1 = mag1[106:0];
-    assign product2 = mag2[106:0];
-    assign product3 = mag3[106:0];
+    //---------------------------------------------------------
+    // 3. Final 59-bit Output Assignment
+    //---------------------------------------------------------
+    assign sum   = PD2_mode ? {s_hi, s_lo} : {29'b0, s42};
+    assign carry = PD2_mode ? {c_hi, c_lo} : {29'b0, c42};
 
 endmodule

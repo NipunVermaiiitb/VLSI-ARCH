@@ -1,286 +1,188 @@
+`timescale 1ns / 1ps
+
 module exponent_comparison (
+    // Inputs from Stage 1 extraction
+    input  [31:0] A_exp, // Packed exponent fields for A0-A3
+    input  [31:0] B_exp, // Packed exponent fields for B0-B3
+    input  [31:0] C_exp, // Packed exponent fields for C0-C1
 
-    input  [31:0] A_exp,
-    input  [31:0] B_exp,
-    input  [31:0] C_exp,
+    input  [2:0]  Prec,  // Mode selection
+    input  [3:0]  Valid, // Valid mask for products
+    input         Para,  // Dual-path Parallel mode
+    input         Cvt,   // Conversion mode
 
-    input  [2:0]  Prec,
-    input  [3:0]  Valid,
-    input         Para,
-    input         Cvt,
-
-    output [31:0] ExpDiff,
-    output [31:0] MaxExp,
-    output [63:0] ProdASC    // Product alignment shift counts for Stage 2
-
+    // Outputs per Figure 5
+    output [31:0] ExpDiff, // To Addend Alignment Shifter (Stage 1)
+    output [31:0] MaxExp,  // To Stage 1 Register -> Stage 4
+    output [63:0] ProdASC  // Product Alignment Shift Counts for Stage 2
 );
 
-    //----------------------------------------------------------
-    // Precision encoding
-    //----------------------------------------------------------
-    parameter HP    = 3'b000;
-    parameter BF16  = 3'b001;
-    parameter TF32  = 3'b010;
-    parameter SP    = 3'b011;
-    parameter DP    = 3'b100;
+    // --- Precision Parameters ---
+    localparam HP   = 3'b000; // 5-bit exp, 15 bias
+    localparam BF16 = 3'b001; // 8-bit exp, 127 bias
+    localparam TF32 = 3'b010; // 8-bit exp, 127 bias
+    localparam SP   = 3'b011; // 8-bit exp, 127 bias
+    localparam DP   = 3'b100; // 11-bit exp, 1023 bias
 
-    // Alignment constants for initial ManC vs ManA*ManB placement.
-    parameter signed [13:0] CONST_DP_BASE  = 14'sd2;
-    parameter signed [13:0] CONST_PD2_BASE = 14'sd2;
-    parameter signed [13:0] CONST_PD4_BASE = 14'sd2;
+    // --- Biases ---
+    localparam [10:0] BIAS_DP = 11'd1023;
+    localparam [10:0] BIAS_SP = 11'd127; // Same for BF16/TF32
+    localparam [10:0] BIAS_HP = 11'd15;
 
-    // IEEE-754 exponent biases by format.
-    parameter [12:0] BIAS_DP   = 13'd1023;
-    parameter [12:0] BIAS_SP   = 13'd127;
-    parameter [12:0] BIAS_TF32 = 13'd127;
-    parameter [12:0] BIAS_HP   = 13'd15;
-    parameter [12:0] BIAS_BF16 = 13'd127;
+    // Internal signed registers (14-bit to handle bias math safely)
+    reg signed [13:0] A_e [0:3];
+    reg signed [13:0] B_e [0:3];
+    reg signed [13:0] C_e [0:1];
 
-    function signed [13:0] unpack_exp_unbiased;
-        input [10:0] exp_field;
-        input [12:0] bias;
-        begin
-            // For exp==0 (zero/subnormal), use 1-bias effective exponent.
-            if (exp_field == 11'd0)
-                unpack_exp_unbiased = 14'sd1 - $signed({1'b0, bias});
-            else
-                unpack_exp_unbiased = $signed({3'd0, exp_field}) - $signed({1'b0, bias});
-        end
-    endfunction
-
-    //----------------------------------------------------------
-    // Per-lane exponents in unified signed space (unbiased)
-    //----------------------------------------------------------
-    reg signed [13:0] A_e3, A_e2, A_e1, A_e0;
-    reg signed [13:0] B_e3, B_e2, B_e1, B_e0;
-    reg signed [13:0] C_e3, C_e2, C_e1, C_e0;
-
-    // Product exponents per lane/group
-    wire signed [13:0] AB_e3 = A_e3 + B_e3;
-    wire signed [13:0] AB_e2 = A_e2 + B_e2;
-    wire signed [13:0] AB_e1 = A_e1 + B_e1;
-    wire signed [13:0] AB_e0 = A_e0 + B_e0;
-
-    wire en3 = Valid[3];
-    wire en2 = Valid[2];
-    wire en1 = Valid[1];
-    wire en0 = Valid[0];
-
-    wire en_top28 = en3 | en2;
-    wire en_bot28 = en1 | en0;
+    // Product exponents: E_p = E_a + E_b
+    wire signed [13:0] AB_e [0:3];
+    assign AB_e[0] = A_e[0] + B_e[0];
+    assign AB_e[1] = A_e[1] + B_e[1];
+    assign AB_e[2] = A_e[2] + B_e[2];
+    assign AB_e[3] = A_e[3] + B_e[3];
 
     reg signed [13:0] exp_ab_max;
-    reg signed [13:0] exp_c0;
-    reg signed [13:0] exp_c1;
     reg signed [13:0] exp_c_max;
-    reg signed [13:0] const_term;
 
-    reg [12:0] bias_ab_dbg;
-    reg [12:0] bias_c_dbg;
+    // Which lanes are actually used
+    reg [3:0] lane_valid;
 
-    reg [15:0] asc_c0;
-    reg [15:0] asc_c1;
-
-    // Product ASCs for Stage 2
-    reg [15:0] asc_p0;
-    reg [15:0] asc_p1;
-    reg [15:0] asc_p2;
-    reg [15:0] asc_p3;
-    reg signed [15:0] asc_p_raw0;
-    reg signed [15:0] asc_p_raw1;
-    reg signed [15:0] asc_p_raw2;
-    reg signed [15:0] asc_p_raw3;
-
-    reg signed [15:0] asc_raw0;
-    reg signed [15:0] asc_raw1;
-
-    reg signed [15:0] exp_ab_dbg;
-    reg signed [15:0] exp_c_dbg;
-
+    // --- Format-Specific Extraction ---
+    // CRITICAL: Bit ranges must match the packing in component_formatter.
+    //   component_formatter SP packs as: {A_in[62:55], 8'd0, A_in[30:23], 8'd0}
+    //   So: lane3 exp at [31:24], lane1 exp at [15:8]
     always @(*) begin
-        // Defaults
-        A_e3 = 14'sd0; A_e2 = 14'sd0; A_e1 = 14'sd0; A_e0 = 14'sd0;
-        B_e3 = 14'sd0; B_e2 = 14'sd0; B_e1 = 14'sd0; B_e0 = 14'sd0;
-        C_e3 = 14'sd0; C_e2 = 14'sd0; C_e1 = 14'sd0; C_e0 = 14'sd0;
+        // Reset defaults
+        {A_e[0], A_e[1], A_e[2], A_e[3]} = {14'sd0, 14'sd0, 14'sd0, 14'sd0};
+        {B_e[0], B_e[1], B_e[2], B_e[3]} = {14'sd0, 14'sd0, 14'sd0, 14'sd0};
+        {C_e[0], C_e[1]} = {14'sd0, 14'sd0};
+        lane_valid = 4'b0000;
 
         case (Prec)
             DP: begin
+                lane_valid = 4'b0001; // Only lane 0 for DP
+                A_e[0] = $signed({3'd0, A_exp[10:0]}) - $signed({3'd0, BIAS_DP});
+                B_e[0] = $signed({3'd0, B_exp[10:0]}) - $signed({3'd0, BIAS_DP});
                 if (Para) begin
-                    // DP product path remains DP exponent, but C is two SP addends.
-                    A_e0 = unpack_exp_unbiased(A_exp[10:0], BIAS_DP);
-                    B_e0 = unpack_exp_unbiased(B_exp[10:0], BIAS_DP);
-                    C_e3 = unpack_exp_unbiased({3'd0, C_exp[31:24]}, BIAS_SP);
-                    C_e1 = unpack_exp_unbiased({3'd0, C_exp[15:8]},  BIAS_SP);
+                    C_e[1] = $signed({6'd0, C_exp[31:24]}) - $signed({6'd0, BIAS_SP});
+                    C_e[0] = $signed({6'd0, C_exp[15:8]})  - $signed({6'd0, BIAS_SP});
                 end else begin
-                    A_e0 = unpack_exp_unbiased(A_exp[10:0], BIAS_DP);
-                    B_e0 = unpack_exp_unbiased(B_exp[10:0], BIAS_DP);
-                    C_e0 = unpack_exp_unbiased(C_exp[10:0], BIAS_DP);
+                    C_e[0] = $signed({3'd0, C_exp[10:0]}) - $signed({3'd0, BIAS_DP});
+                    C_e[1] = -14'sd8192; // No C1 in DP single-path
                 end
             end
 
-            SP,
-            TF32: begin
-                A_e3 = unpack_exp_unbiased({3'd0, A_exp[31:24]}, BIAS_SP);
-                A_e1 = unpack_exp_unbiased({3'd0, A_exp[15:8]},  BIAS_SP);
-                B_e3 = unpack_exp_unbiased({3'd0, B_exp[31:24]}, BIAS_SP);
-                B_e1 = unpack_exp_unbiased({3'd0, B_exp[15:8]},  BIAS_SP);
-                C_e3 = unpack_exp_unbiased({3'd0, C_exp[31:24]}, BIAS_SP);
-                C_e1 = unpack_exp_unbiased({3'd0, C_exp[15:8]},  BIAS_SP);
+            SP, TF32: begin
+                // SP packing: {exp_upper[31:24], 8'd0, exp_lower[15:8], 8'd0}
+                lane_valid = (Prec == TF32) ? 4'b0101 : 4'b1010; // SP: lanes 3,1; TF32: lanes 2,0
+                if (Prec == SP) begin
+                    A_e[3] = $signed({6'd0, A_exp[31:24]}) - $signed({6'd0, BIAS_SP});
+                    A_e[1] = $signed({6'd0, A_exp[15:8]})  - $signed({6'd0, BIAS_SP});
+                    B_e[3] = $signed({6'd0, B_exp[31:24]}) - $signed({6'd0, BIAS_SP});
+                    B_e[1] = $signed({6'd0, B_exp[15:8]})  - $signed({6'd0, BIAS_SP});
+                end else begin
+                    // TF32: same packing format as SP
+                    A_e[2] = $signed({6'd0, A_exp[31:24]}) - $signed({6'd0, BIAS_SP});
+                    A_e[0] = $signed({6'd0, A_exp[15:8]})  - $signed({6'd0, BIAS_SP});
+                    B_e[2] = $signed({6'd0, B_exp[31:24]}) - $signed({6'd0, BIAS_SP});
+                    B_e[0] = $signed({6'd0, B_exp[15:8]})  - $signed({6'd0, BIAS_SP});
+                end
+                C_e[1] = $signed({6'd0, C_exp[31:24]}) - $signed({6'd0, BIAS_SP});
+                C_e[0] = $signed({6'd0, C_exp[15:8]})  - $signed({6'd0, BIAS_SP});
+            end
+
+            BF16: begin
+                lane_valid = 4'b1111;
+                A_e[3] = $signed({6'd0, A_exp[31:24]}) - $signed({6'd0, BIAS_SP});
+                A_e[2] = $signed({6'd0, A_exp[23:16]}) - $signed({6'd0, BIAS_SP});
+                A_e[1] = $signed({6'd0, A_exp[15:8]})  - $signed({6'd0, BIAS_SP});
+                A_e[0] = $signed({6'd0, A_exp[7:0]})   - $signed({6'd0, BIAS_SP});
+
+                B_e[3] = $signed({6'd0, B_exp[31:24]}) - $signed({6'd0, BIAS_SP});
+                B_e[2] = $signed({6'd0, B_exp[23:16]}) - $signed({6'd0, BIAS_SP});
+                B_e[1] = $signed({6'd0, B_exp[15:8]})  - $signed({6'd0, BIAS_SP});
+                B_e[0] = $signed({6'd0, B_exp[7:0]})   - $signed({6'd0, BIAS_SP});
+
+                C_e[1] = $signed({6'd0, C_exp[31:24]}) - $signed({6'd0, BIAS_SP});
+                C_e[0] = $signed({6'd0, C_exp[7:0]})   - $signed({6'd0, BIAS_SP});
             end
 
             HP: begin
-                A_e3 = unpack_exp_unbiased({6'd0, A_exp[28:24]}, BIAS_HP);
-                A_e2 = unpack_exp_unbiased({6'd0, A_exp[20:16]}, BIAS_HP);
-                A_e1 = unpack_exp_unbiased({6'd0, A_exp[12:8]},  BIAS_HP);
-                A_e0 = unpack_exp_unbiased({6'd0, A_exp[4:0]},   BIAS_HP);
+                lane_valid = 4'b1111;
+                // HP packing: {3'b000,exp5, 3'b000,exp5, 3'b000,exp5, 3'b000,exp5}
+                // Lane 3 at [28:24], Lane 2 at [20:16], Lane 1 at [12:8], Lane 0 at [4:0]
+                A_e[3] = $signed({9'd0, A_exp[28:24]}) - $signed({9'd0, BIAS_HP});
+                A_e[2] = $signed({9'd0, A_exp[20:16]}) - $signed({9'd0, BIAS_HP});
+                A_e[1] = $signed({9'd0, A_exp[12:8]})  - $signed({9'd0, BIAS_HP});
+                A_e[0] = $signed({9'd0, A_exp[4:0]})   - $signed({9'd0, BIAS_HP});
 
-                B_e3 = unpack_exp_unbiased({6'd0, B_exp[28:24]}, BIAS_HP);
-                B_e2 = unpack_exp_unbiased({6'd0, B_exp[20:16]}, BIAS_HP);
-                B_e1 = unpack_exp_unbiased({6'd0, B_exp[12:8]},  BIAS_HP);
-                B_e0 = unpack_exp_unbiased({6'd0, B_exp[4:0]},   BIAS_HP);
+                B_e[3] = $signed({9'd0, B_exp[28:24]}) - $signed({9'd0, BIAS_HP});
+                B_e[2] = $signed({9'd0, B_exp[20:16]}) - $signed({9'd0, BIAS_HP});
+                B_e[1] = $signed({9'd0, B_exp[12:8]})  - $signed({9'd0, BIAS_HP});
+                B_e[0] = $signed({9'd0, B_exp[4:0]})   - $signed({9'd0, BIAS_HP});
 
-                C_e3 = unpack_exp_unbiased({6'd0, C_exp[28:24]}, BIAS_HP);
-                C_e2 = unpack_exp_unbiased({6'd0, C_exp[20:16]}, BIAS_HP);
-                C_e1 = unpack_exp_unbiased({6'd0, C_exp[12:8]},  BIAS_HP);
-                C_e0 = unpack_exp_unbiased({6'd0, C_exp[4:0]},   BIAS_HP);
+                C_e[1] = $signed({9'd0, C_exp[28:24]}) - $signed({9'd0, BIAS_HP});
+                C_e[0] = $signed({9'd0, C_exp[4:0]})   - $signed({9'd0, BIAS_HP});
             end
-
-            BF16: begin
-                A_e3 = unpack_exp_unbiased({3'd0, A_exp[31:24]}, BIAS_BF16);
-                A_e2 = unpack_exp_unbiased({3'd0, A_exp[23:16]}, BIAS_BF16);
-                A_e1 = unpack_exp_unbiased({3'd0, A_exp[15:8]},  BIAS_BF16);
-                A_e0 = unpack_exp_unbiased({3'd0, A_exp[7:0]},   BIAS_BF16);
-
-                B_e3 = unpack_exp_unbiased({3'd0, B_exp[31:24]}, BIAS_BF16);
-                B_e2 = unpack_exp_unbiased({3'd0, B_exp[23:16]}, BIAS_BF16);
-                B_e1 = unpack_exp_unbiased({3'd0, B_exp[15:8]},  BIAS_BF16);
-                B_e0 = unpack_exp_unbiased({3'd0, B_exp[7:0]},   BIAS_BF16);
-
-                C_e3 = unpack_exp_unbiased({3'd0, C_exp[31:24]}, BIAS_BF16);
-                C_e2 = unpack_exp_unbiased({3'd0, C_exp[23:16]}, BIAS_BF16);
-                C_e1 = unpack_exp_unbiased({3'd0, C_exp[15:8]},  BIAS_BF16);
-                C_e0 = unpack_exp_unbiased({3'd0, C_exp[7:0]},   BIAS_BF16);
-            end
-
             default: ;
         endcase
     end
 
+    // --- Exponent Comparison (Max finding) ---
+    // Only consider lanes that are actually valid for the current mode
     always @(*) begin
         exp_ab_max = -14'sd8192;
-        exp_c0     = -14'sd8192;
-        exp_c1     = -14'sd8192;
-        exp_c_max  = -14'sd8192;
-        const_term = 14'sd0;
-        bias_ab_dbg = BIAS_DP;
-        bias_c_dbg  = BIAS_DP;
+        if (lane_valid[3] && (AB_e[3] > exp_ab_max)) exp_ab_max = AB_e[3];
+        if (lane_valid[2] && (AB_e[2] > exp_ab_max)) exp_ab_max = AB_e[2];
+        if (lane_valid[1] && (AB_e[1] > exp_ab_max)) exp_ab_max = AB_e[1];
+        if (lane_valid[0] && (AB_e[0] > exp_ab_max)) exp_ab_max = AB_e[0];
 
-        case (Prec)
-            DP: begin
-                if (Para) begin
-                    // DP product + dual SP addends.
-                    exp_ab_max = AB_e0;
-                    exp_c1 = C_e3;
-                    exp_c0 = C_e1;
-                    exp_c_max = (exp_c1 > exp_c0) ? exp_c1 : exp_c0;
+        if (exp_ab_max == -14'sd8192) exp_ab_max = 14'sd0;
 
-                    // Para adds +1 for dual-addend path
-                    const_term = CONST_DP_BASE + 14'sd1 + $signed({13'd0, Cvt});
-                    bias_ab_dbg = BIAS_DP;
-                    bias_c_dbg  = BIAS_SP;
-                end else begin
-                    // Regular DP has one effective lane.
-                    if (|Valid) begin
-                        exp_ab_max = AB_e0;
-                        exp_c0     = C_e0;
-                        exp_c1     = C_e0;
-                        exp_c_max  = C_e0;
-                        const_term = CONST_DP_BASE + $signed({13'd0, Cvt});
-                    end
-                    bias_ab_dbg = BIAS_DP;
-                    bias_c_dbg  = BIAS_DP;
-                end
-            end
-
-            SP,
-            TF32: begin
-                if (en_top28) exp_ab_max = AB_e3;
-                if (en_bot28 && (AB_e1 > exp_ab_max)) exp_ab_max = AB_e1;
-
-                exp_c1 = en_top28 ? C_e3 : -14'sd8192;
-                exp_c0 = en_bot28 ? C_e1 : -14'sd8192;
-                exp_c_max = (exp_c1 > exp_c0) ? exp_c1 : exp_c0;
-
-                const_term = CONST_PD2_BASE + $signed({13'd0, Cvt});
-                bias_ab_dbg = BIAS_SP;
-                bias_c_dbg  = BIAS_SP;
-            end
-
-            HP,
-            BF16: begin
-                if (en3) exp_ab_max = AB_e3;
-                if (en2 && (AB_e2 > exp_ab_max)) exp_ab_max = AB_e2;
-                if (en1 && (AB_e1 > exp_ab_max)) exp_ab_max = AB_e1;
-                if (en0 && (AB_e0 > exp_ab_max)) exp_ab_max = AB_e0;
-
-                // Stage1 addend alignment uses two C paths; group lanes into high/low halves.
-                exp_c1 = ((en3 ? C_e3 : -14'sd8192) > (en2 ? C_e2 : -14'sd8192)) ? (en3 ? C_e3 : -14'sd8192) : (en2 ? C_e2 : -14'sd8192);
-                exp_c0 = ((en1 ? C_e1 : -14'sd8192) > (en0 ? C_e0 : -14'sd8192)) ? (en1 ? C_e1 : -14'sd8192) : (en0 ? C_e0 : -14'sd8192);
-                exp_c_max = (exp_c1 > exp_c0) ? exp_c1 : exp_c0;
-
-                const_term = CONST_PD4_BASE + $signed({13'd0, Cvt});
-                bias_ab_dbg = (Prec == HP) ? BIAS_HP : BIAS_BF16;
-                bias_c_dbg  = (Prec == HP) ? BIAS_HP : BIAS_BF16;
-            end
-
-            default: ;
-        endcase
-
-        // Guard against invalid groups being disabled.
-        if (exp_ab_max == -14'sd8192) begin
-            exp_ab_max = 14'sd0;
-        end
-        if (exp_c1 == -14'sd8192) begin
-            exp_c1 = 14'sd0;
-        end
-        if (exp_c0 == -14'sd8192) begin
-            exp_c0 = 14'sd0;
-        end
-        if (exp_c_max == -14'sd8192) begin
-            exp_c_max = 14'sd0;
-        end
-
-        asc_raw1 = exp_ab_max - exp_c1 - const_term;
-        asc_raw0 = exp_ab_max - exp_c0 - const_term;
-
-        // Saturate at 0. Upper bound clamp is handled in shifter stage.
-        asc_c1 = asc_raw1[15] ? 16'd0 : {2'd0, asc_raw1[13:0]};
-        asc_c0 = asc_raw0[15] ? 16'd0 : {2'd0, asc_raw0[13:0]};
-
-        // Product ASCs for Stage 2 (inter-product alignment)
-        // Calculate shift amount for each product relative to max product exponent
-        asc_p_raw0 = $signed({2'd0, exp_ab_max}) - $signed({2'd0, AB_e0});
-        asc_p_raw1 = $signed({2'd0, exp_ab_max}) - $signed({2'd0, AB_e1});
-        asc_p_raw2 = $signed({2'd0, exp_ab_max}) - $signed({2'd0, AB_e2});
-        asc_p_raw3 = $signed({2'd0, exp_ab_max}) - $signed({2'd0, AB_e3});
-
-        asc_p0 = asc_p_raw0[15] ? 16'd0 : {2'd0, asc_p_raw0[13:0]};
-        asc_p1 = asc_p_raw1[15] ? 16'd0 : {2'd0, asc_p_raw1[13:0]};
-        asc_p2 = asc_p_raw2[15] ? 16'd0 : {2'd0, asc_p_raw2[13:0]};
-        asc_p3 = asc_p_raw3[15] ? 16'd0 : {2'd0, asc_p_raw3[13:0]};
-
-        // Re-bias debug exponents for readability in MaxExp.
-        exp_ab_dbg = exp_ab_max + $signed({1'b0, bias_ab_dbg});
-        exp_c_dbg  = exp_c_max  + $signed({1'b0, bias_c_dbg});
+        // C max: Only consider C lanes that have data
+        if (C_e[1] == -14'sd8192)
+            exp_c_max = C_e[0];
+        else if (C_e[1] > C_e[0])
+            exp_c_max = C_e[1];
+        else
+            exp_c_max = C_e[0];
     end
 
-    // ExpDiff packs two Stage1 ASCs: {ASC_C1, ASC_C0}
-    assign ExpDiff = {asc_c1, asc_c0};
+    // --- Output Assignments ---
 
-    // MaxExp packs useful references for downstream debug/processing: {ExpCMax, ExpABMax}
-    assign MaxExp = {exp_c_dbg[15:0], exp_ab_dbg[15:0]};
+    // 1. ExpDiff drives Stage 1 Addend Shifter
+    //    Includes format constant: C starts at bit 162, shifted right to land
+    //    at the correct position relative to the product.
+    //    Updated per user architecture specs:
+    wire [7:0] asc_const = (Prec == DP)   ? 8'd2  :
+                           (Prec == SP)   ? 8'd3  :
+                           (Prec == TF32) ? 8'd16 :
+                           (Prec == HP)   ? 8'd6  :
+                           8'd12; // BF16
 
-    // ProdASC packs four product ASCs for Stage 2: {ASC_P3, ASC_P2, ASC_P1, ASC_P0}
-    assign ProdASC = {asc_p3, asc_p2, asc_p1, asc_p0};
+    wire signed [13:0] asc1_raw = $signed({6'd0, asc_const}) + (exp_ab_max - C_e[1]);
+    wire signed [13:0] asc0_raw = $signed({6'd0, asc_const}) + (exp_ab_max - C_e[0]);
+
+    assign ExpDiff[31:16] = (asc1_raw > 0) ? asc1_raw[15:0] : 16'd0;
+    assign ExpDiff[15:0]  = (asc0_raw > 0) ? asc0_raw[15:0] : 16'd0;
+
+    // 2. MaxExp: pass ref_exp for Stage 4 exponent calculation
+    //    ref_exp = max(exp_ab_max + asc_const, exp_c_max) — this is the exponent
+    //    that position 162 represents in the magnitude field.
+    //    Output biased exp = ref_exp + bias - LZA_CNT
+    wire signed [13:0] exp_ab_plus_const = exp_ab_max + $signed({6'd0, asc_const});
+    wire signed [13:0] ref_exp = (exp_ab_plus_const > exp_c_max) ? exp_ab_plus_const : exp_c_max;
+
+    assign MaxExp = { {2{ref_exp[13]}}, ref_exp, {2{exp_ab_max[13]}}, exp_ab_max };
+
+    // 3. ProdASC: per-lane product alignment shift counts for Stage 2
+    wire signed [13:0] pdiff0 = exp_ab_max - AB_e[0];
+    wire signed [13:0] pdiff1 = exp_ab_max - AB_e[1];
+    wire signed [13:0] pdiff2 = exp_ab_max - AB_e[2];
+    wire signed [13:0] pdiff3 = exp_ab_max - AB_e[3];
+    assign ProdASC[15:0]  = (pdiff0 > 0) ? pdiff0[15:0] : 16'd0;
+    assign ProdASC[31:16] = (pdiff1 > 0) ? pdiff1[15:0] : 16'd0;
+    assign ProdASC[47:32] = (pdiff2 > 0) ? pdiff2[15:0] : 16'd0;
+    assign ProdASC[63:48] = (pdiff3 > 0) ? pdiff3[15:0] : 16'd0;
 
 endmodule

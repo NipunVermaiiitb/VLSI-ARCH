@@ -1,44 +1,80 @@
 module Products_Alignment_Shifter (
-    input  [106:0] product0,
-    input  [106:0] product1,
-    input  [106:0] product2,
-    input  [106:0] product3,
+    input  [111:0] unaligned_112, // Raw 112-bit bus from Multiplier Stage 2 CPA
+    input  [63:0]  ProdASC,       // {ASC_P3, ASC_P2, ASC_P1, ASC_P0}
+    input  [3:0]   Sign_AB,       // Product signs
+    input          PD_mode,       // DP
+    input          PD2_mode,      // SP/TF32
+    input          PD4_mode,      // HP/BF16
+    input  [2:0]   Prec,          // ADDED: Prec mode
 
-    input  [63:0]  ProdASC,     // {ASC_P3, ASC_P2, ASC_P1, ASC_P0}
-    input          PD_mode,
-    input          PD2_mode,
-    input          PD4_mode,
-
-    output [162:0] aligned_p0,
-    output [162:0] aligned_p1,
-    output [162:0] aligned_p2,
-    output [162:0] aligned_p3
+    output [107:0] unified_product_108 // 108-bit Unified Product
 );
+    localparam TF32 = 3'b010;
 
-    // Unpack ASCs
-    wire [15:0] asc_p0 = ProdASC[15:0];
-    wire [15:0] asc_p1 = ProdASC[31:16];
-    wire [15:0] asc_p2 = ProdASC[47:32];
-    wire [15:0] asc_p3 = ProdASC[63:48];
+    wire [27:0] p_raw [0:3];
+    assign p_raw[0] = unaligned_112[27:0];
+    assign p_raw[1] = unaligned_112[55:28];
+    assign p_raw[2] = unaligned_112[83:56];
+    assign p_raw[3] = unaligned_112[111:84];
 
-    // Clamp shift amounts to 163 to avoid invalid shifts
-    wire [7:0] shift0 = (asc_p0 > 16'd163) ? 8'd163 : asc_p0[7:0];
-    wire [7:0] shift1 = (asc_p1 > 16'd163) ? 8'd163 : asc_p1[7:0];
-    wire [7:0] shift2 = (asc_p2 > 16'd163) ? 8'd163 : asc_p2[7:0];
-    wire [7:0] shift3 = (asc_p3 > 16'd163) ? 8'd163 : asc_p3[7:0];
+    wire [26:0] p_aligned_HP [0:3];
+    function [26:0] shift_and_flip_HP;
+        input [27:0] data_in;
+        input [15:0] shift_amt;
+        input        sign_bit;
+        reg   [27:0] shifted;
+        begin
+            shifted = data_in >> shift_amt[4:0];
+            shift_and_flip_HP = (sign_bit) ? ~shifted[26:0] : shifted[26:0];
+        end
+    endfunction
 
-    // Extend products to 163 bits: place product at HIGH side of accumulator.
-    // The 56-bit LSB pad provides GRS bits below the product mantissa.
-    // Mode-specific exponent calibration (accum_offset) is in Output_Formatter.
-    wire [162:0] product0_ext = {product0, 56'd0};
-    wire [162:0] product1_ext = {product1, 56'd0};
-    wire [162:0] product2_ext = {product2, 56'd0};
-    wire [162:0] product3_ext = {product3, 56'd0};
+    assign p_aligned_HP[0] = shift_and_flip_HP(p_raw[0], ProdASC[15:0],  Sign_AB[0]);
+    assign p_aligned_HP[1] = shift_and_flip_HP(p_raw[1], ProdASC[31:16], Sign_AB[1]);
+    assign p_aligned_HP[2] = shift_and_flip_HP(p_raw[2], ProdASC[47:32], Sign_AB[2]);
+    assign p_aligned_HP[3] = shift_and_flip_HP(p_raw[3], ProdASC[63:48], Sign_AB[3]);
 
-    // Mode-based alignment
-    assign aligned_p0 = PD_mode ? product0_ext : (product0_ext >>> shift0);
-    assign aligned_p1 = (PD_mode || (!PD2_mode && !PD4_mode)) ? 163'd0 : (product1_ext >>> shift1);
-    assign aligned_p2 = PD4_mode ? (product2_ext >>> shift2) : 163'd0;
-    assign aligned_p3 = (PD2_mode || PD4_mode) ? (product3_ext >>> shift3) : 163'd0;
+    wire [55:0] p_raw_SP [0:1];
+    assign p_raw_SP[0] = unaligned_112[55:0];
+    assign p_raw_SP[1] = unaligned_112[111:56];
+
+    wire [53:0] p_aligned_SP [0:1];
+    function [53:0] shift_and_flip_SP;
+        input [55:0] data_in;
+        input [15:0] shift_amt;
+        input        sign_bit;
+        reg   [55:0] shifted;
+        begin
+            shifted = data_in >> shift_amt[5:0];
+            shift_and_flip_SP = (sign_bit) ? ~shifted[53:0] : shifted[53:0];
+        end
+    endfunction
+    
+    // PD2 modes use two packed 56-bit lanes. Their exponent/sign indices differ by format:
+    // SP   : lower->lane1, upper->lane3
+    // TF32 : lower->lane0, upper->lane2
+    wire [15:0] sp_lower_asc  = (Prec == TF32) ? ProdASC[15:0]  : ProdASC[31:16];
+    wire [15:0] sp_upper_asc  = (Prec == TF32) ? ProdASC[47:32] : ProdASC[63:48];
+    wire        sp_lower_sign = (Prec == TF32) ? Sign_AB[0]     : Sign_AB[1];
+    wire        sp_upper_sign = (Prec == TF32) ? Sign_AB[2]     : Sign_AB[3];
+
+    assign p_aligned_SP[0] = shift_and_flip_SP(p_raw_SP[0], sp_lower_asc, sp_lower_sign);
+    assign p_aligned_SP[1] = shift_and_flip_SP(p_raw_SP[1], sp_upper_asc, sp_upper_sign);
+
+    reg [107:0] unified_out;
+
+    always @(*) begin
+        if (PD4_mode) begin
+            unified_out = {p_aligned_HP[3], p_aligned_HP[2], p_aligned_HP[1], p_aligned_HP[0]};
+        end
+        else if (PD2_mode) begin
+            unified_out = {p_aligned_SP[1], p_aligned_SP[0]};
+        end
+        else begin
+            unified_out = (Sign_AB[0]) ? ~unaligned_112[107:0] : unaligned_112[107:0];
+        end
+    end
+
+    assign unified_product_108 = unified_out;
 
 endmodule

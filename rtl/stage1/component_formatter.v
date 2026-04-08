@@ -54,19 +54,16 @@ module component_formatter (
     assign A_sign = (Prec == DP) && en_dp56 ? {3'b0, A_in[63]} : {A_in[63] & en_seg3, A_in[47] & en_seg2, A_in[31] & en_seg1, A_in[15] & en_seg0};
     assign B_sign = (Prec == DP) && en_dp56 ? {3'b0, B_in[63]} : {B_in[63] & en_seg3, B_in[47] & en_seg2, B_in[31] & en_seg1, B_in[15] & en_seg0};
     
-    // C_sign extraction with Para mode support for DP
+    // Fix: Ensure C_sign[0] always carries the primary sign for DP mode
     always @(*) begin
-        if (Prec == DP && !Para && en_dp56) begin
-            // Single DP addend sign in lane0 position.
-            C_sign = {3'b000, C_in[63]};
-        end
-        else if (Prec == DP && Para && en_dp56) begin
-            // Para=1 in DP mode: two SP addend signs carried in low lanes.
-            C_sign = {2'b00, C_in[63], C_in[31]};
-        end
-        else begin
-            // Paper model: adder consumes at most two C addends (upper/lower groups).
-            C_sign = {2'b00, (C_in[63] & en_top28), (C_in[31] & en_bot28)};
+        if (Prec == DP) begin
+            if (Para)
+                C_sign = {2'b00, C_in[63], C_in[31]}; // C1, C0
+            else
+                C_sign = {3'b000, C_in[63]};          // C0
+        end else begin
+            // SIMD modes: lane-based extraction
+            C_sign = {C_in[63], C_in[47], C_in[31], C_in[15]};
         end
     end
 

@@ -1,12 +1,10 @@
 module Stage2_Top (
-
     input clk,
     input rst_n,
 
     //------------------------------------------------
     // Inputs directly from Stage 1 modules
     //------------------------------------------------
-
     input  [111:0] partial_products_sum_s1,
     input  [111:0] partial_products_carry_s1,
     input  [31:0]  ExpDiff_s1,
@@ -17,6 +15,7 @@ module Stage2_Top (
 
     input  [3:0]   Sign_AB_s1,
     input  [3:0]   Sign_C_s1,
+    input  [1:0]   Sticky_C_s1,   // Sticky bits for IEEE rounding in Stage 3
 
     input  [2:0]   Prec_s1,
     input  [3:0]   Valid_s1,
@@ -26,149 +25,97 @@ module Stage2_Top (
     input          PD4_mode_s1,
 
     //------------------------------------------------
-    // Outputs after Stage 2
+    // Outputs after Stage 2 (To Stage 3)
     //------------------------------------------------
-
     output [162:0] Sum_s2,
     output [162:0] Carry_s2,
+    output [162:0] Aligned_C_s2,
 
-    output [162:0] Aligned_C_dual_s2,
-    output [162:0] Aligned_C_high_s2,
-
-    output [3:0]   Sign_AB_s2,
+    output [3:0]   Sign_AB_s2,    // Forwarded
+    output [3:0]   Sign_C_s2,     // Forwarded
+    output [1:0]   Sticky_C_s2,   // Forwarded
 
     output [2:0]   Prec_s2,
     output [3:0]   Valid_s2,
-
     output         PD_mode_s2
-
 );
 
     //------------------------------------------------
-    // Direct wire assignments (Stage1_Module already has pipeline register)
+    // Direct wire assignments
     //------------------------------------------------
-
     wire [111:0] partial_products_sum   = partial_products_sum_s1;
     wire [111:0] partial_products_carry = partial_products_carry_s1;
-    wire [31:0]  ExpDiff          = ExpDiff_s1;
-    wire [31:0]  MaxExp           = MaxExp_s1;
     wire [63:0]  ProdASC          = ProdASC_s1;
-
-    wire [162:0] Aligned_C        = Aligned_C_s1;
-
-    wire [3:0]   Sign_AB          = Sign_AB_s1;
-    wire [3:0]   Sign_C           = Sign_C_s1;
-
-    wire [2:0]   Prec             = Prec_s1;
-    wire [3:0]   Valid            = Valid_s1;
 
     wire         PD_mode          = PD_mode_s1;
     wire         PD2_mode         = PD2_mode_s1;
     wire         PD4_mode         = PD4_mode_s1;
 
     //------------------------------------------------
-    // Stage 2 internal wires
+    // 1. Stage 2 Pre-Adder (Sum + Carry -> Magnitude)
     //------------------------------------------------
+    wire [111:0] unaligned_products;
 
-    wire [106:0] product0;
-    wire [106:0] product1;
-    wire [106:0] product2;
-    wire [106:0] product3;
-
-    wire [162:0] aligned_p0;
-    wire [162:0] aligned_p1;
-    wire [162:0] aligned_p2;
-    wire [162:0] aligned_p3;
-
-    //------------------------------------------------
-    // Stage2 Adder
-    //------------------------------------------------
-
-    Stage2_Adder u_stage1_adder (
-
+    Stage2PreAdderCPA u_stage2_preadder (
         .partial_products_sum(partial_products_sum),
         .partial_products_carry(partial_products_carry),
-
-        .PD_mode(PD_mode),
-        .PD2_mode(PD2_mode),
-        .PD4_mode(PD4_mode),
-
-        .product0(product0),
-        .product1(product1),
-        .product2(product2),
-        .product3(product3)
-
+        .sum(unaligned_products)
     );
 
     //------------------------------------------------
-    // Product Alignment Shifter
+    // 2. Product Alignment Shifter
     //------------------------------------------------
+    wire [107:0] unified_product_108;
 
     Products_Alignment_Shifter u_prod_align (
-
-        .product0(product0),
-        .product1(product1),
-        .product2(product2),
-        .product3(product3),
-
-        .ProdASC(ProdASC),
+        .unaligned_112(unaligned_products), // FIX: Corrected wire name
+        .ProdASC(ProdASC),                  // FIX: Added missing shift counts
+        .Sign_AB(Sign_AB_s1),
         .PD_mode(PD_mode),
         .PD2_mode(PD2_mode),
         .PD4_mode(PD4_mode),
-
-        .aligned_p0(aligned_p0),
-        .aligned_p1(aligned_p1),
-        .aligned_p2(aligned_p2),
-        .aligned_p3(aligned_p3)
-
+        .Prec(Prec_s1),
+        .unified_product_108(unified_product_108)
     );
 
     //------------------------------------------------
-    // Apply signs to aligned products (two's complement inversion)
+    // 3. Stage2 Adder (4-to-2 / 3-to-2 CSA)
     //------------------------------------------------
+    wire [58:0] stage2_added_sum;
+    wire [58:0] stage2_added_carry;
 
-    wire [162:0] signed_p0 = Sign_AB[0] ? (~aligned_p0 + 163'd1) : aligned_p0;
-    wire [162:0] signed_p1 = Sign_AB[1] ? (~aligned_p1 + 163'd1) : aligned_p1;
-    wire [162:0] signed_p2 = Sign_AB[2] ? (~aligned_p2 + 163'd1) : aligned_p2;
-    wire [162:0] signed_p3 = Sign_AB[3] ? (~aligned_p3 + 163'd1) : aligned_p3;
-
-    //------------------------------------------------
-    // First CSA (4-to-2)
-    //------------------------------------------------
-
-    CSA_4to2 u_csa (
-
-        .in0(signed_p0),
-        .in1(signed_p1),
-        .in2(signed_p2),
-        .in3(signed_p3),
-
-        .sum(Sum_s2),
-        .carry(Carry_s2)
-
+    Stage2_Adder u_stage2_adder (
+        .unified_product_108(unified_product_108),
+        .PD2_mode(PD2_mode),
+        .PD4_mode(PD4_mode),
+        .sum(stage2_added_sum),
+        .carry(stage2_added_carry)
     );
 
     //------------------------------------------------
-    // Forward C operand
+    // 4. Output MUX (Figure 11: Path 0 vs Path 1)
     //------------------------------------------------
+    // In DP mode (Path 0), the adder is bypassed.
+    // In DPDAC modes (Path 1), the 59-bit CSA results are used.
+    // Zero-padded to 163 bits to fit the Stage 3 unified CPA interface.
 
-    // Paper-style routing into Stage3 4:2 adder:
-    //   - DP path: use a single aligned C input (avoid double counting).
-    //   - DPDAC path: split the 163-bit aligned C into two narrower inputs.
-    wire [162:0] c_dp_signed = Sign_C[0] ? (~Aligned_C + 163'd1) : Aligned_C;
-    wire [162:0] c_split_hi = {Aligned_C[162:82], 82'd0};
-    wire [162:0] c_split_lo = {81'd0, Aligned_C[81:0]};
+    assign Sum_s2   = PD_mode  ? {unified_product_108[106:0], 56'd0} :
+                      PD2_mode ? {unified_product_108[107:0], 55'd0} : // SP (Align MSB to 162)
+                      PD4_mode ? {unified_product_108[107:0], 55'd0} : // HP (Align MSB to 162)
+                      {stage2_added_sum, 104'd0}; 
+    assign Carry_s2 = 163'd0; 
 
-    assign Aligned_C_dual_s2 = PD_mode ? c_dp_signed : c_split_hi;
-    assign Aligned_C_high_s2 = PD_mode ? 163'd0   : c_split_lo;
 
     //------------------------------------------------
-    // Forward control signals to Stage 3
+    // 5. Forwarding control signals to Stage 3
     //------------------------------------------------
+    assign Aligned_C_s2 = Aligned_C_s1;
+    assign Sticky_C_s2  = Sticky_C_s1;  // FIX: Forwarded
+    assign Sign_AB_s2   = Sign_AB_s1;   // FIX: Forwarded
+    assign Sign_C_s2    = Sign_C_s1;    // FIX: Forwarded
 
-    assign Sign_AB_s2 = Sign_AB;
-    assign Prec_s2    = Prec;
-    assign Valid_s2   = Valid;
-    assign PD_mode_s2 = PD_mode;
+    assign Prec_s2      = Prec_s1;
+    assign Valid_s2     = Valid_s1;
+    assign PD_mode_s2   = PD_mode;
 
 endmodule

@@ -1,75 +1,42 @@
-// Normalization Shifter — Stage 4
-//
-// Left-shifts the 163-bit unsigned magnitude result by LZA_CNT positions
-// to move the leading 1 to bit [162] (the implicit integer bit position
-// at the top of the accumulator after normalization).
-//
-// After normalization (left-shift by LZA_CNT):
-//   Norm_mant[162]    = implicit 1 (should be 1 for non-zero result)
-//   Norm_mant[161:110] = 52 DP explicit mantissa bits
-//   Norm_mant[109]    = guard bit  (G)
-//   Norm_mant[108]    = round bit  (R)
-//   Norm_mant[107:0]  = sticky sources (S = OR of these)
-//
-// The IEEE 754 exponent adjustment:
-//   exp_final = MaxExp - LZA_CNT + overflow_flag + rnd_carry
-// where overflow_flag = 1 when the implicit 1 was already at bit 162
-// before shifting (i.e., LZA_CNT would have been 0 but the implicit
-// bit position was already at the top, meaning an extra MSB is present
-// -- in our case this doesn't happen because 163-bit accumulator can
-// always accommodate the leading 1 >= 1 bit below the top during normal
-// operation; bit 162 overflow means the true result was 2x larger and
-// exponent += 1).
-
 `timescale 1ns / 1ps
 
 module Normalization_Shifter (
-
     input  [162:0] Add_Rslt,    // Unsigned magnitude from Stage 3
-    input  [7:0]   LZA_CNT,    // Number of leading zeros (from LZAC)
-    input  [2:0]   Prec,        // Precision mode (needed for overflow_flag)
+    input  [15:0]  LZA_CNT,     // Dual Number of leading zeros: [15:8] hi, [7:0] lo
+    input  [2:0]   Prec,
 
-    output [162:0] Norm_mant,  // Shifted result: implicit 1 at bit [162]
-    output         G,          // Guard bit  (Norm_mant[109])
-    output         R,          // Round bit  (Norm_mant[108])
-    output         S,          // Sticky = OR(Norm_mant[107:0])
-    output         overflow_flag // Implicit bit already at [162] before shift
-
+    output [162:0] Norm_mant,   // Shifted result
+    output         G,           // Guard bit
+    output         R,           // Round bit
+    output         S,           // Sticky bit
+    output [1:0]   lza_error    // 2-bit error: [1] hi, [0] lo
 );
-
     localparam DP = 3'b100;
 
-    // Clamp shift to avoid undefined behavior
-    wire [7:0] shift_amt = (LZA_CNT > 8'd162) ? 8'd162 : LZA_CNT;
+    // 1. Initial Left Shift
+    wire [7:0] shift_amt_hi = (LZA_CNT[15:8] > 8'd54) ? 8'd54 : LZA_CNT[15:8];
+    wire [7:0] shift_amt_lo = (LZA_CNT[7:0] > 8'd109) ? 8'd109 : LZA_CNT[7:0];
+    wire [7:0] shift_amt_dp = (LZA_CNT[15:8] > 8'd162) ? 8'd162 : LZA_CNT[15:8];
 
-    // Left-shift: brings the leading 1 to bit [162]
-    assign Norm_mant = Add_Rslt << shift_amt;
+    wire [53:0] pre_norm_hi = Add_Rslt[162:109] << shift_amt_hi;
+    wire [108:0] pre_norm_lo = Add_Rslt[108:0] << shift_amt_lo;
+    wire [162:0] pre_norm_dp = Add_Rslt << shift_amt_dp;
 
-    // Overflow flag: implicit bit was already at [162] before normalization.
-    // For DP: natural unit product is at ~161, so bit 162 being set = mantissa overflow (+exponent).
-    // For non-DP modes: unit products are well below 162 (154-156 range), so bit 162=1 with LZA=0
-    //   means a very large addend C dominates (ASC=0), not a mantissa overflow — suppress flag.
-    assign overflow_flag = (Prec == DP) ? ((LZA_CNT == 8'd0) & Add_Rslt[162]) : 1'b0;
+    // 2. LZAC Error Correction
+    wire lza_err_hi = ~pre_norm_hi[53] & (|Add_Rslt[162:109]);
+    wire lza_err_lo = ~pre_norm_lo[108] & (|Add_Rslt[108:0]);
+    wire lza_err_dp = ~pre_norm_dp[162] & (|Add_Rslt);
 
+    assign lza_error = (Prec == DP) ? {1'b0, lza_err_dp} : {lza_err_hi, lza_err_lo};
 
-    //----------------------------------------------------------
-    // Guard / Round / Sticky after normalization
-    //
-    // DP: 52 explicit mantissa bits at Norm_mant[161:110]
-    //     Implicit 1 at Norm_mant[162]
-    //     G = Norm_mant[109]
-    //     R = Norm_mant[108]
-    //     S = |Norm_mant[107:0]
-    //
-    // SP/TF32 (23 explicit bits): mantissa at Norm_mant[161:139]
-    //     G = Norm_mant[138]
-    //     (for G/R/S we expose DP-window here; formatter selects per-prec)
-    //
-    // We expose DP-compatible G/R/S; the Output_Formatter uses the
-    // same window for all modes (rounding is done at the DP boundary
-    // and the SP/HP/BF16 formatter takes only the upper mantissa bits).
-    //----------------------------------------------------------
+    // Final 1-bit shift correction
+    wire [53:0]  norm_hi = lza_err_hi ? (pre_norm_hi << 1) : pre_norm_hi;
+    wire [108:0] norm_lo = lza_err_lo ? (pre_norm_lo << 1) : pre_norm_lo;
+    wire [162:0] norm_dp = lza_err_dp ? (pre_norm_dp << 1) : pre_norm_dp;
 
+    assign Norm_mant = (Prec == DP) ? norm_dp : {norm_hi, norm_lo};
+
+    // 3. GRS Bits Extraction (Only used for DP currently in downstream logic)
     assign G = Norm_mant[109];
     assign R = Norm_mant[108];
     assign S = |Norm_mant[107:0];

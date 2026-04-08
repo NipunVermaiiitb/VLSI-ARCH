@@ -1,70 +1,57 @@
-module addend_alignment_shifter (
+`timescale 1ns / 1ps
 
-    input  [55:0]  C_mantissa,
-    input  [31:0]  ExpDiff,
+module addend_alignment_shifter (
+    input  [55:0]  C_mantissa, // Raw bits {C1, C0} or {DP_Man}
+    input  [31:0]  ExpDiff,    // {ASC_C1[15:0], ASC_C0[15:0]} — includes format constant
     input  [2:0]   Prec,
     input          Para,
+    input  [1:0]   Sign_Inv,   // Per-lane sign inversion flags
 
-    output [162:0] Aligned_C
-
+    output [162:0] Aligned_C,
+    output [1:0]   Sticky_Bits
 );
 
-    //----------------------------------------------------------
-    // Precision encoding
-    //----------------------------------------------------------
-    parameter HP    = 3'b000;
-    parameter BF16  = 3'b001;
-    parameter TF32  = 3'b010;
-    parameter SP    = 3'b011;
-    parameter DP    = 3'b100;
+    parameter DP = 3'b100;
 
-    //----------------------------------------------------------
-    // ExpDiff packs two Stage1 ASCs: {ASC_C1, ASC_C0}
-    //----------------------------------------------------------
-    wire [15:0] asc_c1_raw = ExpDiff[31:16];
-    wire [15:0] asc_c0_raw = ExpDiff[15:0];
+    wire [7:0] asc1 = ExpDiff[23:16];
+    wire [7:0] asc0 = ExpDiff[7:0];
 
-    wire [7:0] asc_c1 = (asc_c1_raw > 16'd162) ? 8'd162 : asc_c1_raw[7:0];
-    wire [7:0] asc_c0 = (asc_c0_raw > 16'd162) ? 8'd162 : asc_c0_raw[7:0];
+    // Initial Placement
+    reg [162:0] c_initial;
+    always @(*) begin
+        c_initial = 163'd0;
+        if (Prec == DP && !Para) begin
+            c_initial[162:110] = C_mantissa[52:0];
+        end else begin
+            c_initial[162:135] = C_mantissa[55:28]; // C1 upper window (starts at 162)
+            c_initial[108:81]  = C_mantissa[27:0];  // C0 lower window (starts at 108)
+        end
+    end
 
-    //----------------------------------------------------------
-    // Unified C placement (Stage1): ManC is pre-placed left of
-    // product domain, then two parallel shifters align C1/C0.
-    //----------------------------------------------------------
-    wire [162:0] man_c_unified;
-    wire [81:0]  man_c_hi;
-    wire [80:0]  man_c_lo;
-    wire [81:0]  data_pad;
-
-    // Keep C on the high side so right-shift aligns down into product region.
-    assign man_c_unified = {C_mantissa, 107'd0};
+    // Right-shift logic (DP Unified vs SIMD Split)
+    wire [162:0] shifted_result;
     
-    // Para mode: C_mantissa = {C1[27:0], C0[27:0]} - split for independent alignment
-    // Normal mode: single C value in upper path
-    assign man_c_hi = (Para && Prec == DP) ? {C_mantissa[55:28], 54'd0} : man_c_unified[162:81];
-    assign man_c_lo = (Para && Prec == DP) ? {C_mantissa[27:0], 53'd0}  : man_c_unified[80:0];
+    // Unified shift for DP (163-bit)
+    wire [162:0] dp_shifted = c_initial >> (asc0[7] ? 8'd128 : asc0[6:0]);
 
-    // From paper flow: DP path can reuse high part as datapad for C0 path (only when Para=0 AND regular DP)
-    // Note: DP Para mode uses independent paths, so no datapad reuse
-    assign data_pad = (Prec == DP && !Para) ? man_c_hi : 82'd0;
+    // Split shift for SIMD: Separation at bit 109
+    wire [53:0]  c_hi_window = c_initial[162:109];
+    wire [108:0] c_lo_window = c_initial[108:0];
+    wire [53:0]  simd_hi_shifted = c_hi_window >> asc1[5:0];
+    wire [108:0] simd_lo_shifted = c_lo_window >> asc0[6:0];
+    wire [162:0] simd_shifted = {simd_hi_shifted, simd_lo_shifted};
 
-    //----------------------------------------------------------
-    // Dual alignment shifters controlled by ASC_C1 / ASC_C0
-    //----------------------------------------------------------
-    wire [162:0] sht_rc1;
-    wire [162:0] sht_rc0;
+    assign shifted_result = (Prec == DP) ? dp_shifted : simd_shifted;
 
-    // Place man_c_hi on the upper side before right-shift so [162:81] slice
-    // retains aligned payload for small/medium ASC values.
-    assign sht_rc1 = ({man_c_hi, 81'd0}) >> asc_c1;
-    assign sht_rc0 = ({data_pad, man_c_lo}) >> asc_c0;
+    // Sticky Bits (approximate for now)
+    assign Sticky_Bits[0] = (asc0 > 8'd0);
+    assign Sticky_Bits[1] = (asc1 > 8'd0);
 
-    //----------------------------------------------------------
-    // Merge two aligned paths into one 163-bit addend vector
-    //----------------------------------------------------------
-    assign Aligned_C = {sht_rc1[162:81], sht_rc0[80:0]};
+    // One's Complement Inversion: Separate by lane
+    wire [162:0] inverted;
+    assign inverted[162:109] = Sign_Inv[1] ? ~shifted_result[162:109] : shifted_result[162:109];
+    assign inverted[108:0]   = Sign_Inv[0] ? ~shifted_result[108:0]   : shifted_result[108:0];
 
-    // Note: sticky generation from shifted-out bits can be added later
-    // by exposing dropped-bit ORs from each shifter level/path.
+    assign Aligned_C = inverted;
 
 endmodule

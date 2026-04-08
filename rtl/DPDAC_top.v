@@ -3,28 +3,14 @@
 // ============================================================
 // DPDAC_top — Dot-Product-Dual-Accumulate Top-Level Integration
 //
-// Paper: "A Low-Cost Floating-Point Dot-Product-Dual-Accumulate
-//         Architecture for HPC-Enabled AI", IEEE TCAD 2023.
-//
 // 4-stage pipeline:
 //   S1: Input formatting, Multiplier array, Exponent comparison,
 //       Addend alignment, Sign logic                    [Stage1_Module]
 //   S2: Product unpacking, Product alignment shift,
-//       Sign application, 4:2 CSA (products only)      [Stage2_Top]
+//       Sign application, 4:2 CSA (products only)       [Stage2_Top]
 //   S3: 4:2 CSA (products+addends), LZAC, CPA,
 //       Sign determination, Complement/INC              [Stage3_Top]
 //   S4: Normalization shift, Rounding, Output packing   [Stage4_Top]
-//
-// Precision modes (Prec[2:0]):
-//   3'b000 = HP    (Half Precision,   4-lane)
-//   3'b001 = BF16  (BFloat16,         4-lane)
-//   3'b010 = TF32  (TensorFloat-32,   2-lane)
-//   3'b011 = SP    (Single Precision, 2-lane)
-//   3'b100 = DP    (Double Precision, 1-lane, 2-cycle multiply)
-//
-// Control signals:
-//   Para = 1: in DP mode, C holds TWO SP addends (dual-accumulate in DP)
-//   Cvt  = 1: conversion mode (precision down-cast, adjusts ASC by 1)
 // ============================================================
 
 module DPDAC_top (
@@ -57,32 +43,30 @@ module DPDAC_top (
     wire [31:0]  ExpDiff_s1, MaxExp_s1;
     wire [63:0]  ProdASC_s1;
     wire [162:0] Aligned_C_s1;
+    wire [1:0]   Sticky_C_s1;
     wire [3:0]   Sign_AB_s1;
     wire [3:0]   Sign_C_s1;
+
     wire         Para_s1, Cvt_s1, valid_s1;
     wire         PD_mode_s1, PD2_mode_s1, PD4_mode_s1;
 
     Stage1_Module u_stage1 (
-
         .clk                   (clk),
         .rst_n                 (rst_n),
-
         .A_in                  (A_in),
         .B_in                  (B_in),
         .C_in                  (C_in),
-
         .Prec                  (Prec),
         .Para                  (Para),
         .Cvt                   (Cvt),
 
         .partial_products_sum  (pp_sum_s1),
         .partial_products_carry(pp_carry_s1),
-
         .ExpDiff               (ExpDiff_s1),
         .MaxExp                (MaxExp_s1),
         .ProdASC               (ProdASC_s1),
-
         .Aligned_C             (Aligned_C_s1),
+        .Sticky_C              (Sticky_C_s1),   // FIXED: Added Sticky
         .Sign_AB               (Sign_AB_s1),
         .Sign_C                (Sign_C_s1),
 
@@ -93,120 +77,117 @@ module DPDAC_top (
         .PD_mode               (PD_mode_s1),
         .PD2_mode              (PD2_mode_s1),
         .PD4_mode              (PD4_mode_s1)
-
     );
 
-    // Keep Stage1 carry-save product rows separate into Stage2.
-    // Stage2 performs mode-dependent compression (PD2: +3:2, PD4: 4:2-only path,
-    // PD: bypass).
     wire [111:0] partial_products_sum_s1   = pp_sum_s1;
     wire [111:0] partial_products_carry_s1 = pp_carry_s1;
+    wire [2:0]   Prec_s1_wire  = Prec;
+    wire [3:0]   Valid_s1_wire = (Prec == 3'b010) ? 4'b0101 : 4'b1111;
 
-    // Determine Prec and Valid for downstream stages from Stage1 internals
-    // Stage1_Module re-registers Prec internally; we need to pass it forward.
-    // For simplicity: re-decode from Prec (combinational — matches Stage1 internal state)
-    wire [2:0]  Prec_s1_wire  = Prec;  // Prec is already stable when Stage1 output arrives
-    wire [3:0]  Valid_s1_wire = (Prec == 3'b010) ? 4'b0101 : 4'b1111; // TF32 uses lanes 0,2
-
-    // MaxExp must be pipelined to Stage 4 (3 more registers: S1→S2, S2→S3, S3→S4)
-    // We pipeline it separately alongside the main data path.
-
-    // --------------- MaxExp pipeline registers S1→S2 (gated by valid_s1) ---------------
+    // --------------- Sideband Pipeline S1 -> S2 ---------------
+    // Gated by valid_s1 for DP mode multi-cycle handling
     reg [31:0] MaxExp_s2_reg;
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) MaxExp_s2_reg <= 32'd0;
-        else if (valid_s1) MaxExp_s2_reg <= MaxExp_s1;
-    end
+    reg        Cvt_s2_reg;
+    reg [2:0]  Prec_s2_pipe;
 
-    // --------------- Prec pipeline register S1→S2 (gated by valid_s1) ---------------
-    reg [2:0] Prec_s2_pipe;
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) Prec_s2_pipe <= 3'd0;
-        else if (valid_s1) Prec_s2_pipe <= Prec_s1_wire;
+        if (!rst_n) begin
+            MaxExp_s2_reg <= 32'd0;
+            Cvt_s2_reg    <= 1'b0;
+            Prec_s2_pipe  <= 3'd0;
+        end else if (valid_s1) begin
+            MaxExp_s2_reg <= MaxExp_s1;
+            Cvt_s2_reg    <= Cvt_s1;
+            Prec_s2_pipe  <= Prec_s1_wire;
+        end
     end
 
     // =========================================================
-    // STAGE 2: Product alignment + 4:2 CSA on products
+    // STAGE 2: Product alignment + MUXing
     // =========================================================
 
-    wire [162:0] Sum_s2, Carry_s2;
-    wire [162:0] Aligned_C_dual_s2, Aligned_C_high_s2;
-    wire [3:0]   Sign_AB_s2;
+    wire [162:0] Sum_s2, Carry_s2, Aligned_C_s2;
+    wire [3:0]   Sign_AB_s2, Sign_C_s2;
+    wire [1:0]   Sticky_C_s2;
     wire [2:0]   Prec_s2;
     wire [3:0]   Valid_s2;
     wire         PD_mode_s2;
 
     Stage2_Top u_stage2 (
-
-        .clk                (clk),
-        .rst_n              (rst_n),
-
-        .partial_products_sum_s1(partial_products_sum_s1),
+        .clk                      (clk),
+        .rst_n                    (rst_n),
+        .partial_products_sum_s1  (partial_products_sum_s1),
         .partial_products_carry_s1(partial_products_carry_s1),
-        .ExpDiff_s1         (ExpDiff_s1),
-        .MaxExp_s1          (MaxExp_s1),
-        .ProdASC_s1         (ProdASC_s1),
+        .ExpDiff_s1               (ExpDiff_s1),
+        .MaxExp_s1                (MaxExp_s1),
+        .ProdASC_s1               (ProdASC_s1),
+        .Aligned_C_s1             (Aligned_C_s1),
 
-        .Aligned_C_s1       (Aligned_C_s1),
+        .Sign_AB_s1               (Sign_AB_s1),
+        .Sign_C_s1                (Sign_C_s1),
+        .Sticky_C_s1              (Sticky_C_s1), // FIXED
 
-        .Sign_AB_s1         (Sign_AB_s1),
-        .Sign_C_s1          (Sign_C_s1),
+        .Prec_s1                  (Prec_s1_wire),
+        .Valid_s1                 (Valid_s1_wire),
 
-        .Prec_s1            (Prec_s1_wire),
-        .Valid_s1           (Valid_s1_wire),
+        .PD_mode_s1               (PD_mode_s1),
+        .PD2_mode_s1              (PD2_mode_s1),
+        .PD4_mode_s1              (PD4_mode_s1),
 
-        .PD_mode_s1         (PD_mode_s1),
-        .PD2_mode_s1        (PD2_mode_s1),
-        .PD4_mode_s1        (PD4_mode_s1),
+        .Sum_s2                   (Sum_s2),
+        .Carry_s2                 (Carry_s2),
+        .Aligned_C_s2             (Aligned_C_s2), // FIXED: Unified
 
-        .Sum_s2             (Sum_s2),
-        .Carry_s2           (Carry_s2),
+        .Sign_AB_s2               (Sign_AB_s2),
+        .Sign_C_s2                (Sign_C_s2),    // FIXED
+        .Sticky_C_s2              (Sticky_C_s2),  // FIXED
 
-        .Aligned_C_dual_s2  (Aligned_C_dual_s2),
-        .Aligned_C_high_s2  (Aligned_C_high_s2),
-
-        .Sign_AB_s2         (Sign_AB_s2),
-
-        .Prec_s2            (Prec_s2),
-        .Valid_s2           (Valid_s2),
-
-        .PD_mode_s2         (PD_mode_s2)
-
+        .Prec_s2                  (Prec_s2),
+        .Valid_s2                 (Valid_s2),
+        .PD_mode_s2               (PD_mode_s2)
     );
 
-    // --------------- MaxExp pipeline register S2→S3 ---------------
-    reg [31:0] MaxExp_s3_reg;
+    // --------------- Sideband Pipeline S2 -> S3 -> S4 ---------------
+    reg [31:0] MaxExp_s3_reg, MaxExp_s4_reg;
+    reg        Cvt_s3_reg, Cvt_s4_reg;
+
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) MaxExp_s3_reg <= 32'd0;
-        else        MaxExp_s3_reg <= MaxExp_s2_reg;
+        if (!rst_n) begin
+            MaxExp_s3_reg <= 32'd0; Cvt_s3_reg <= 1'b0;
+            MaxExp_s4_reg <= 32'd0; Cvt_s4_reg <= 1'b0;
+        end else begin
+            MaxExp_s3_reg <= MaxExp_s2_reg;
+            Cvt_s3_reg    <= Cvt_s2_reg;
+
+            MaxExp_s4_reg <= MaxExp_s3_reg;
+            Cvt_s4_reg    <= Cvt_s3_reg;
+        end
     end
 
     // =========================================================
-    // STAGE 3: CSA merge with addends, LZAC, CPA, sign/complement
+    // STAGE 3: CSA merge, LZAC, CPA, Sign/Complement
     // =========================================================
 
     wire [162:0] Add_Rslt_s3;
-    wire [7:0]   LZA_CNT_s3;
-    wire         Result_sign_s3;
+    wire [15:0]  LZA_CNT_s3;
+    wire [3:0]   Result_sign_s3;
     wire [2:0]   Prec_s3;
     wire [3:0]   Valid_s3;
 
     Stage3_Top u_stage3 (
-
         .clk                (clk),
         .rst_n              (rst_n),
 
         .Sum_s2             (Sum_s2),
         .Carry_s2           (Carry_s2),
-
-        .Aligned_C_dual_s2  (Aligned_C_dual_s2),
-        .Aligned_C_high_s2  (Aligned_C_high_s2),
+        .Aligned_C_s2       (Aligned_C_s2), // FIXED: Unified
 
         .Sign_AB_s2         (Sign_AB_s2),
+        .Sign_C_s2          (Sign_C_s2),    // FIXED
+        .Sticky_C_s2        (Sticky_C_s2),  // FIXED
 
         .Prec_s2            (Prec_s2),
         .Valid_s2           (Valid_s2),
-
         .PD_mode_s2         (PD_mode_s2),
         .valid_s1           (valid_s1),
 
@@ -216,22 +197,13 @@ module DPDAC_top (
 
         .Prec_s3            (Prec_s3),
         .Valid_s3           (Valid_s3)
-
     );
 
-    // --------------- MaxExp pipeline register S3→S4 ---------------
-    reg [31:0] MaxExp_s4_reg;
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) MaxExp_s4_reg <= 32'd0;
-        else        MaxExp_s4_reg <= MaxExp_s3_reg;
-    end
-
     // =========================================================
-    // STAGE 4: Normalization, Rounding, Output formatting
+    // STAGE 4: Normalization, Rounding, Output Formatter
     // =========================================================
 
     Stage4_Top u_stage4 (
-
         .clk            (clk),
         .rst_n          (rst_n),
 
@@ -239,15 +211,14 @@ module DPDAC_top (
         .LZA_CNT_s3     (LZA_CNT_s3),
         .Result_sign_s3 (Result_sign_s3),
 
-        .MaxExp_s3      (MaxExp_s4_reg),
-
+        .MaxExp_s3      (MaxExp_s3_reg),
         .Prec_s3        (Prec_s3),
         .Valid_s3       (Valid_s3),
+        .Cvt_s3         (Cvt_s3_reg), // FIXED: Aligned with data pipeline depth
 
         .Result_out     (Result_out),
         .Valid_out      (Valid_out),
         .Result_sign_out(Result_sign_out)
-
     );
 
 endmodule
