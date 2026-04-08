@@ -21,7 +21,7 @@ module tb_metrics_final;
     parameter int DATA_WIDTH = `DATA_WIDTH;     // 64=DP, 32=SP, 16=HP/BF16
     parameter int PIPELINE_DEPTH = (DATA_WIDTH == 64) ? 6 : 5;
     parameter int NUM_PARALLEL_MAC = `NUM_PARALLEL_MAC;
-    parameter real CLK_PERIOD_NS = 0.68;        // From synthesis
+    parameter real CLK_PERIOD_NS = 25.6;        // From synthesis
     parameter int NUM_TRANSACTIONS = 1000;
 
     // ====================================================

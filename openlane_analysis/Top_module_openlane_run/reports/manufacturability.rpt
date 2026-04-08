@@ -1,0 +1,19 @@
+Design Name: DPDAC_top
+Run Directory: /openlane/designs/Top_module/runs/RUN_2026.04.08_18.16.13
+----------------------------------------
+
+Magic DRC Summary:
+Source: /openlane/designs/Top_module/runs/RUN_2026.04.08_18.16.13/reports/signoff/drc.rpt
+Total Magic DRC violations is 0
+----------------------------------------
+
+LVS Summary:
+Source: /openlane/designs/Top_module/runs/RUN_2026.04.08_18.16.13/logs/signoff/39-DPDAC_top.lef.lvs.log
+Number of nets: 24390                      |Number of nets: 24390                      
+Design is LVS clean.
+----------------------------------------
+
+Antenna Summary:
+Source: /openlane/designs/Top_module/runs/RUN_2026.04.08_18.16.13/logs/signoff/41-arc.log
+Pin violations: 38
+Net violations: 38
