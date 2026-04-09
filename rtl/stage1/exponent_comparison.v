@@ -160,8 +160,8 @@ module exponent_comparison (
                            (Prec == HP)   ? 8'd6  :
                            8'd12; // BF16
 
-    wire signed [13:0] asc1_raw = $signed({6'd0, asc_const}) + (exp_ab_max - C_e[1]);
-    wire signed [13:0] asc0_raw = $signed({6'd0, asc_const}) + (exp_ab_max - C_e[0]);
+    wire signed [15:0] asc1_raw = $signed({6'd0, asc_const}) + (exp_ab_max - C_e[1]);
+    wire signed [15:0] asc0_raw = $signed({6'd0, asc_const}) + (exp_ab_max - C_e[0]);
 
     assign ExpDiff[31:16] = (asc1_raw > 0) ? asc1_raw[15:0] : 16'd0;
     assign ExpDiff[15:0]  = (asc0_raw > 0) ? asc0_raw[15:0] : 16'd0;
