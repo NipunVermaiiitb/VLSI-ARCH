@@ -1,0 +1,47 @@
+# Simulation Artifacts
+*.vvp
+*.vcd
+*.vpd
+*.fsdb
+*.vdb
+*.bak
+*~
+
+# Compilation Directories
+simv
+simv.daidir/
+csrc/
+work/
+libs/
+
+# Specific Redundant Logs in sim/bin/
+sim/bin/*err.txt
+sim/bin/debug*.txt
+sim/bin/log_debug*.txt
+sim/bin/*err2.txt
+sim/bin/err*.txt
+sim/bin/hp2e.txt
+sim/bin/s3e.txt
+sim/bin/s4e.txt
+sim/bin/s12e.txt
+sim/bin/s3_comp_err.txt
+sim/bin/s1s2_err.txt
+sim/bin/sp_err.txt
+sim/bin/sp2_err.txt
+sim/bin/bbe*.txt
+sim/bin/full_err*.txt
+sim/bin/log_s4_compile*.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+*.txt

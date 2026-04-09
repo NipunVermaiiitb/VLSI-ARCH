@@ -1,0 +1,43 @@
+===================================================
+Stage 4 Unit Testbench
+===================================================
+
+--- TC-S4-1: DP 3.5 (positive) ---
+  Result_out = 0x3ffc000000000000 (expect 0x400C000000000000)
+  FAIL [DP_3.5_val]: Expected 0x400C000000000000 for 3.5 DP
+  PASS [DP_3.5_sign]
+  TC-S4-1: FAIL
+
+--- TC-S4-2: DP -1.0 (negative) ---
+  Result_out = 0xbfe0000000000000 (expect 0xBFF0000000000000)
+  FAIL [DP_neg1_val]: Expected -1.0 DP
+  PASS [DP_neg1_sign]
+  TC-S4-2: FAIL
+
+--- TC-S4-3: DP normalization (LZA_CNT=8) ---
+  Result_out = 0x3f98000000000000
+  exp field  = 0x3f9 (expect 0x3FA = 1018)
+  FAIL [NormShift_exp]: Exponent should be 1018 after LZA=8
+  TC-S4-3: FAIL
+
+--- TC-S4-4: SP 1.0 dual-lane structural check ---
+  Result_out = 0x3fc000003fc00000
+  Valid_out  = 0101 (expect 0101)
+  PASS [SP_nonzero]
+  PASS [SP_valid]
+  TC-S4-4: PASS
+
+--- TC-S4-5: Underflow to zero ---
+  Result_out = 0x0000000000000000 (expect zero)
+  PASS [Underflow_zero]
+  TC-S4-5: PASS
+
+--- TC-S4-6: HP 1.0 quad-lane ---
+  Result_out = 0x3800380038003800 (expect 0x3C003C003C003C00)
+  FAIL [HP_1.0_quad]: HP 1.0 quad
+  TC-S4-6: FAIL
+
+===================================================
+Stage 4 Tests: FAILED (4 errors)
+===================================================
+sim\testbenches\tb_stage4_top.v:275: $finish called at 245000 (1ps)

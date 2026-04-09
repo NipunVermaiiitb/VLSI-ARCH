@@ -1,0 +1,26 @@
+
+54. Printing statistics.
+
+=== Stage1_Module ===
+
+   Number of wires:              22225
+   Number of wire bits:          23860
+   Number of public wires:          46
+   Number of public wire bits:    1681
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              23587
+     $_ANDNOT_                    8918
+     $_AND_                       1031
+     $_DFFE_PN0P_                  309
+     $_DFF_PN0_                    493
+     $_MUX_                       1268
+     $_NAND_                       376
+     $_NOR_                       2610
+     $_NOT_                        892
+     $_ORNOT_                      869
+     $_OR_                        3535
+     $_XNOR_                       944
+     $_XOR_                       2342
+

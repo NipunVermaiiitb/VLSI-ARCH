@@ -1,0 +1,15 @@
+After BF16: result=3f803f803f803f80 valid=1111
+After TC-7 local reset+2 idles
+Applied Op1. Sweeping pipeline...
+  cyc0: valid_s1=1 result=0000000000000000
+  cyc1: valid_s1=0 result=0000000000000000
+  Applied Op2
+  cyc2: valid_s1=1 result=0000000000000000 valid=0001
+  cyc3: valid_s1=0 result=0000000000000000 valid=0001
+  cyc4: valid_s1=1 result=3ff8000000000000 valid=0001
+  cyc5: valid_s1=0 result=400c000000000000 valid=0001
+  cyc6: valid_s1=1 result=400c000000000000 valid=0001
+  cyc7: valid_s1=0 result=4004000000000000 valid=0001
+  cyc8: valid_s1=1 result=4014000000000000 valid=0001
+  cyc9: valid_s1=0 result=4010000000000000 valid=0001
+sim\testbenches\tb_bb_debug.v:54: $finish called at 276000 (1ps)

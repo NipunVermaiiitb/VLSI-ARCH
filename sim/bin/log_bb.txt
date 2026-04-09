@@ -1,0 +1,17 @@
+Applying Op1 (1.5*2.0+0.5=3.5) and watching pipeline...
+  cyc0: valid_s1=1 result=0000000000000000 valid=0001
+  cyc1: Applied Op2 (2.0*2.0+0.0=4.0)
+  cyc1: valid_s1=0 result=0000000000000000 valid=0001
+  cyc2: valid_s1=1 result=0000000000000000 valid=0001
+  cyc3: valid_s1=0 result=0000000000000000 valid=0001
+  cyc4: valid_s1=1 result=3ff8000000000000 valid=0001
+  cyc5: valid_s1=0 result=400c000000000000 valid=0001
+  cyc6: valid_s1=1 result=400c000000000000 valid=0001
+  cyc7: valid_s1=0 result=4004000000000000 valid=0001
+  cyc8: valid_s1=1 result=4014000000000000 valid=0001
+  cyc9: valid_s1=0 result=4010000000000000 valid=0001
+  cyc10: valid_s1=1 result=4010000000000000 valid=0001
+  cyc11: valid_s1=0 result=4010000000000000 valid=0001
+  cyc12: valid_s1=1 result=4010000000000000 valid=0001
+  cyc13: valid_s1=0 result=4010000000000000 valid=0001
+sim\testbenches\tb_bb_debug.v:36: $finish called at 196000 (1ps)

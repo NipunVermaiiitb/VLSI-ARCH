@@ -1,0 +1,1033 @@
+﻿IEEE TRANSACTIONS ON COMPUTER-AIDED DESIGN OF INTEGRATED CIRCUITS AND SYSTEMS, VOL. 43, NO. 2, FEBRUARY 2024 681
+
+A Low-Cost Floating-Point
+Dot-Product-Dual-Accumulate
+
+Architecture for HPC-Enabled AI
+Hongbing Tan , Libo Huang , Zhong Zheng, Hui Guo , Qianmin Yang , Li Shen,
+
+Gang Chen , Liquan Xiao, and Nong Xiao , Senior Member, IEEE
+
+∑
+Abstract—The dot-product N
+
+i=1 Ai ×Bi is one of the most fre- However, the versatility of data types and the tremendous
+quently used operations for a wide variety of high-performance computational power of HPC and AI converged computing
+computing (HPC) and artificial intelligence (AI) applications. lead to expensive costs and complexity in hardware design.
+However, for large-scale algorithms, such as GEMM and FFT,
+independent additions are necessary to accumulate the results As a solution, transprecision computing [4] has been exten-
+of length-limited dot-product in order to form the final result, sively explored to address the growing need for improved
+thus increasing latency and overhead. Hence, we proposed a performance and energy efficiency in modern computing
+dot-product-dual-accumulate (DPDAC) architecture capable of
+
+∑ systems.
+performing N=1,2,4
+
+( i=1 Ai × Bi +
+∑M=1,2
+
+j=1 Cj) on a wide range of In addition to the commonly used double-precision (DP)
+formats. The proposed architecture supports both single-path and and single-precision (SP) formats in traditional HPC systems,
+dual-path execution. The single path is designed for performing recent research efforts have explored various formats in mod-
+DP FMA or DPDAC of lower formats, while dual-path supports
+parallel operations for single-precision (SP) addition and 2-term ern systems to achieve higher energy efficiency. For example,
+SP or TF32 dot-product or 4-term HP or BF16 dot-product. Intel Nervana’s Flexpoint [5], Google TPU’s 16-bit “Bfloats
+Moreover, numerical precision conversion is also supported by (BF16)” [6], and NVIDIA’s 19-bit TestFloat-32 (TF32) imple-
+the proposed architecture, allowing for the conversion of num- mented in specific accelerators such as Tensor Cores [7],
+bers to higher or lower formats. The proposed DPDAC has been demonstrate the necessity of new architectures with extreme
+demonstrated to significantly reduce the overhead in comparison
+to discrete designs that utilize multiple single-mode FP units to transprecision flexibility for floating-point (FP) computation.
+achieve the same functionalities. Furthermore, when compared These advancements, driven by deep learning algorithms and
+to the state-of-the-art multiple-precision designs, the proposed applications, highlight the growing demand for more efficient
+architecture has been shown to support a wide range of formats FP operations. Compared to high-precision formats, lower
+and a greater variety of operations with lower costs. precision numbers can not only save memory resources but
+
+Index Terms—Dot-product-dual-accumulate (DPDAC), fused also be implemented more efficiently in hardware due to
+multiply-add, high-performance computing (HPC)-enabled arti- their smaller bitwidth. However, the implementation of HPC-
+ficial intelligence (AI), mixed-precision, numerical precision
+conversion, transprecision computing. enabled AI algorithms using complete low-precision opera-
+
+tions may incur accuracy loss due to its narrower dynamic
+range or limited precision [8], [9]. Thus, mixed-precision
+
+I. INTRODUCTION methods are also widely explored to increase performance
+while maintaining high accuracy, performing multiplications
+
+RECENTLY, the integration of high-performance comput- in lower precision while accumulating products into higher
+ing (HPC) and artificial intelligence (AI) has become precision. For example, in the field of linear algebra, SP [10]
+
+an exciting and innovative paradigm for academia and indus- and half-precision (HP) [8] are used as the low-precision for-
+try [1], [2], [3]. HPC-enabled AI workloads require sophisti- mats for the majority of computations in iterative refinement,
+cated hardware support to process a wide range of data formats while DP is used at the last few stages to refine the results.
+and perform trillions of calculations per second, or more. Likewise, in order to reduce the accumulated rounding error
+
+Manuscript received 21 February 2023; revised 6 July 2023; accepted of deep learning algorithms, low-precision formats, such as
+27 August 2023. Date of publication 18 September 2023; date of cur- TF32 [11], HP [9], and BF16 [12] multiplications need to be
+rent version 22 January 2024. This work was supported by the Key accumulated into SP format in convolution (CONV) or general
+Laboratory of Advanced Microprocessor Chips and Systems; in part by
+NSFC under Grant 62272475 and Grant 62090023; and in part by NSFHN matrix multiplication (GEMM) of deep learning applications.
+under Grant 2022JJ10064. This article was recommended by Associate Editor So far, transprecision FP multiply-accumulate (MAC) units
+K. Olcoz. (Corresponding author: Libo Huang.) have been developed to reduce area, power consumption,
+
+Hongbing Tan, Libo Huang, Zhong Zheng, Hui Guo, Qianmin Yang,
+Li Shen, and Liquan Xiao are with the College of Computer Science and latency, and improve accuracy compared to a network of
+Technology, National University of Defense Technology, Changsha 410073, discrete FP units by executing common logic for multiple oper-
+China (e-mail: libohuang@nudt.edu.cn). ations in parallel. Previous FP units in [13], [14], and [15]
+
+Gang Chen and Nong Xiao are with the School of Data and Computer
+Science, Sun Yat-sen University, Guangzhou 510006, China. support multiple formats and improve throughput by using
+
+Digital Object Identifier 10.1109/TCAD.2023.3316994 parallel operations, but have lower efficiency in performing
+1937-4151 ©c 2023 IEEE. Personal use is permitted, but republication/redistribution requires IEEE permission.
+
+See https://www.ieee.org/publications/rights/index.html for more information.
+
+Authorized licensed use limited to: International Institute of Information Technology Bangalore. Downloaded on January 27,2026 at 12:38:41 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+
+682 IEEE TRANSACTIONS ON COMPUTER-AIDED DESIGN OF INTEGRATED CIRCUITS AND SYSTEMS, VOL. 43, NO. 2, FEBRUARY 2024
+
+dot-product algorithms, such as fast Fourier transform (FFT),
+GEMM, and CONV. Designs in [16] and [17] proposed FP
+dot-product units that sum up multiple products together to
+improve performance and reduce overhead. However, when
+using these dot-product units to construct the computing
+systems, independent adders are required to sum up the
+result generated by each unit, resulting in extra hardware
+costs. Additionally, previous FP units primarily focused on
+
+Fig. 1. Supported FP formats of the proposed DPDAC architecture.
+the implementation of HPC applications, but provided limited
+support for transprecision operations that are well-suited for
+deep learning algorithms. Section IV details the circuit implementation of each module.
+
+Hence, we proposed a dot-product-dual-accumulate Section V presents the methodology, synthesis results, analy-
+(DPDAC) architecture capable of supporting transprecision sis, and comparison with previous works. Finally, Section VI
+FP operations for both HPC and AI algorithms. The proposed concludes the article.
+architecture supports both single-path and dual-path execution
+by splitting the DPDAC into two parts for a broad range
+of scenarios. For single-path execution, it can perform one II. BACKGROUND
+
+DP fused multiply-accumulate (FMA) or one DPDAC of A. Numerical Format
+lower formats. For dual-path execution, it supports parallel The standard FP formats are defined in IEEE754-2008 stan-
+operations for SP addition and 2-term SP or TF32 dot-product dard [18] which consist of three components: 1) the 1-bit sign
+or 4-term HP or BF16 dot-product. In addition to supporting (S); 2) the e-bit biased exponent (E); and 3) the m-bit man-
+multiply-add operations, the DPDAC architecture can be tissa (M). The actual value of the normal number represented
+modified to facilitate numerical precision conversion, thereby in IEEE 754-2008 format is
+enabling the conversion of numbers to higher or lower
+
+(−1)S × (
+im + 2−n × )
+
+M × 2E−bias
+formats to accommodate the datatype transformation in (1)
+the datapath of mixed-precision algorithms. The proposed
+
+the bias is the exponent bias whose value is 2m−1 − 1, im is
+DPDAC significantly reduces the overhead compared to the
+
+the implicit bit for the mantissa. For normal numbers, im = 1.
+discrete design that utilizes multiple single-mode FP units to
+
+For zero and subnormal numbers, im = 0. In this article, the
+achieve the same functionalities. Furthermore, compared to
+
+components of the standard formats, DP, SP, and HP, defined
+the state-of-the-art multiple-precision designs, the proposed
+
+in IEEE 754-2008, and the TF32 and BF16 formats are shown
+architecture supports a wide range of formats and more
+
+in Fig. 1.
+types of operations, such as DPDAC, NPCv, and dual-path
+execution, with lower costs.
+
+The major contributions of this article are summarized as B. Conventional FP FMA Architecture
+follows. The basic FP FMA architecture that computes the oper-
+
+1) We pr∑opose a DPDAC architecture capable of support- ation A × B + C is implemented as the baseline design of
+ing N=1,2,4
+
+( i=1 Ai × Bi + ∑M=1,2
+j=1 Cj). The proposed the proposed DPDAC architecture. In conventional FP FMA
+
+architecture can be configured to perform dot- architecture, all the operands are of the same precision, and
+product, addition, and FMA by setting the operational the whole datapath is usually divided into three pipeline stages
+modes. to improve performance. The datapath of the conventional FP
+
+2) The proposed architecture supports both single-path and FMA architecture is described as follows.
+dual-path execution for transprecision FP operations, 1) The mantissa padded with 1-bit implicit bit, ManA and
+allowing for one DP FMA or one DPDAC of lower for- ManB, are multiplied by an unsigned multiplier, and then
+mats to be performed in single-path execution, as well generate the carry-save format product.
+as parallel operations for SP addition and 2-term SP or 2) At the same time, the exponent difference between prod-
+TF32 dot-product or 4-term HP or BF16 dot-product in uct A × B and C, the sign processing, the exponent
+dual-path execution. prediction, and alignment for addend C based on the
+
+3) The proposed architecture supports NPCv in mixed- value of exponent difference are also performed in the
+precision operations. Numbers can be converted to first pipeline stage.
+higher or lower formats based on the practical require- 3) Then, in the second pipeline stage, the aligned addend
+ment of mixed-precision algorithms with negligible C and the mantissa product are added together through
+overhead. a carry save adder (CSA) and a carry propagate adder
+
+4) The proposed DPDAC architecture supports more for- (CPA), and the normalization shifting amount is also
+mats and functionalities compared to other multiformat predicted by a leading zero anticipator and counting
+FP units with lower costs. (LZAC) unit at the same time.
+
+The remainder of this article is structured as follows: 4) Finally, normalization shifting and exponent adjustment
+Section II provides the background for this work. Section III are performed according to the leading zero amount; and
+outlines the design of the proposed arithmetic architecture. then rounding to generate the mantissa. The FMA result
+
+Authorized licensed use limited to: International Institute of Information Technology Bangalore. Downloaded on January 27,2026 at 12:38:41 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+
+TAN et al.: LOW-COST FLOATING-POINT DOT-PRODUCT-DUAL-ACCUMULATE ARCHITECTURE 683
+
+TABLE I
+MAIN ABBREVIATIONS IN THIS ARTICLE
+
+(a) (b)
+
+Fig. 2. DPDAC in previous computing architecture. (a) DPDAC in systolic
+array architecture. (b) DPDAC in adder tree architecture.
+
+is obtained after the combination of the processed sign,
+the adjusted exponent, and the rounded mantissa.
+
+In this article, we proposed a DPDAC architecture that mod-
+ifies the conventional FP FMA architecture to support a wide
+range of formats and more operations. The main abbreviations
+used in this article are listed in Table I. Compared to the con-
+ventional FP FMA operations, the proposed architecture can
+be configured to perform FMA, addition, and dot-product by
+setting part of the operands to “0.” The proposed architec- Fig. 3. Mixed precision dataflow used for DNN’s training.
+ture supports mixed-precision operations, where A and B are
+of lower precision while C is of higher precision, as well as
+dual-path execution, allowing two operations to be performed and vector computations. In matrix computation stages, dot-
+in parallel. Moreover, the NPCv are also merged into the data- product is performed by adder tree, and the generated results
+path of the proposed DPDAC architecture, which can convert are sent to an adder to be accumulated with the intermediate
+high-precision results to lower precision formats, and by set- results from the convolution buffer (CB). As shown in Fig. 2,
+ting C to “0” and B to “1” in mixed-precision operation, the both the systolic array and adder tree architectures incorporate
+lower precision operand A can be converted to higher precision an adder to accumulate the results generated by MAC cells
+results. The basic implementation steps of the proposed archi- with the previous intermediate results. The proposed DPDAC
+tecture are similar to the conventional FP FMA architecture, architecture can be configured into various modes to meet the
+however, the bitwidth of the datapath is extended to accom- requirements of these two computing architectures.
+modate the higher precision addend and the pipeline stages Moreover, the DPDAC unit has the potential to be a
+and the datapath need to be adjusted significantly to improve fundamental building block in general-purpose architectures
+performance and realize the added functionalities for improved to efficiently perform deep learning instructions, such as
+performance and efficiency. the Intel’s AVX-512 VNNI [22], Arm’s v8-SVE [23], and
+
+v9-SME. With the support of mixed-precision dot-product, it
+C. DPDAC in Processors Architecture has the capability to significantly reduce latency and enhance
+
+the accuracy of deep learning operations.
+The arithmetic units are designed and organized for con-
+
+structing the computing architecture of processors to achieve
+high performance. Two mainstream computing architectures D. NPCv in Mixed-Precision Datapath
+have been applied in previous processors that the systolic Mixed-precision computation is extensively employed in
+array architecture in [6] and [19] and the adder tree archi- DNN’s training [9], [12] and iteratively refining matrix equa-
+tecture in [20] and [21]. A typical 2-D systolic array used in tion solvers [8], [24] for enhanced performance and overhead
+TPU [6] is shown in Fig. 2(a). For the dataflow of the systolic reduction. The dataflow of mixed-precision training of DNNs,
+array, each MAC cell receives data from the up and left cells where the data type undergoes transformation in different
+(i.e., A and B) and the intermediate results (i.e., C) generated layers, is illustrated in Fig. 3. The core computations of for-
+by the up cell. Before writing to the accumulator buffer, the ward (FWD)/backward (BWD) propagation or weight gradient
+results generated by the MAC cells of the bottom row must be (WG) are represented as GEMM operations, which accept
+added to the intermediate results from the accumulator buffer. inputs as low-precision tensors and accumulate the output to
+Fig. 2(b) shows an adder tree architecture proposed by [21], SP tensors. In the FWD/BWD propagation, the low-precision
+in which the weights and activations from the W-Buffer and activations or error gradients together with the converted
+A-buffer are sent to the calculation pipelines to perform matrix weight are sent to the GEMM, and then the NPCv converts the
+
+Authorized licensed use limited to: International Institute of Information Technology Bangalore. Downloaded on January 27,2026 at 12:38:41 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+
+684 IEEE TRANSACTIONS ON COMPUTER-AIDED DESIGN OF INTEGRATED CIRCUITS AND SYSTEMS, VOL. 43, NO. 2, FEBRUARY 2024
+
+GEMM output tensors to low-precision formats before passing improved by accumulating the parallel multiplication prod-
+them to the next layer. ucts in one operation. Additionally, the rounding errors are
+
+The proposed DPDAC architecture offers three key benefits also minimized due to the fewer rounding times.
+by adding the circuits for NPCv.
+
+1) Compared to designing a standard NPCv cell, minor B. Tradeoff Between Area and Performance in Multiplier
+modifications to the output processing and rounding Design
+in the proposed architecture can achieve the same
+
+The proposed design supports DP, SP, TF32, HP, and BF16
+functionality.
+
+formats in one architecture, constructed using high-precision-
+2) The proposed architecture eliminates the need for storing
+
+split methods. The design of the multiplier features a quadratic
+high-precision GEMM results in memory and subse-
+
+growth in silicon area with respect to the number of mantissa
+quent retrieval for conversion in an NPCv cell. This
+
+bits. For example, a 16-bit HP multiplier using 11 mantissa
+approach effectively reduces two memory accesses,
+
+bits requires 112 = 121 units of area, while a 32-bit SP
+thereby enhancing the efficiency of mixed-precision
+
+multiplier considering 24 mantissa bits employs 242 = 576.
+algorithms.
+
+To reduce overhead, iteration methods are applied in the
+3) Storing the converted lower precision number in memory
+
+multiplier design, at the cost of performance. Based on the
+can effectively reduce the memory footprint by half.
+
+highest format supported by the proposed design, the number
+of iterations (Niter) is utilized to make a tradeoff between area
+
+III. DPDAC ARCHITECTURE and performance for the multiplier array. Thus, the number of
+A. Functions of the DPDAC Architecture units (Nunit) required for constructing the multiplier array is
+
+inversely proportional to N
+The proposed DPDAC architecture supports a broad range iter
+
+⌈ ⌉
+of FP formats to meet the practical requirements of HPC Nunit = W2
+
+DP/Niter (2)
+and AI algorithms. Specifically, DP and SP formats are uti-
+lized for HPC applications, while SP, TF32, HP, and BF16 where WDP denote the mantissa bits of the DP format. The
+are suitable for deep learning scenarios. In addition to the number of parallel operations NP for each format is limited by
+standard and mixed-precision FMA operations similar to the two factors: 1) the number of units Nunit and 2) the bitwidth
+pioneering designs of [25], [26], and [27], the proposed design of the input operands. This can be expressed as follows:
+also includes the newly added DPDAC and NPCv, as well as ( (⌊ ⌋ ⌊ ⌋) ⌈ ⌉)
+dual-path execution. The operations supported by the proposed 64 N W2
+
+NP = max min unit
+, , 1/ P (3)
+
+design can be summarized. BWP W2
+P Nunit
+
+1) Based on the practical requirements of HPC algorithms,
+the proposed design supports both DP and SP operations where BWP and WP are the bitwidth and mantissa bits of the
+
+with the same precision. To improve performance while aimed formats, respectively. The constant 64 is the bitwidth
+
+maintaining high accuracy for deep learning algorithms, of the input operands. Various formats are used in transpre-
+
+mixed-precision operations are utilized, wherein lower cision computing to achieve high efficiency in practical HPC
+
+precision products, such as TF32, HP, or BF16 formats, and AI converged algorithms. The parallel operations of for-
+
+are accumulate∑d to SP format. mats, NP, is thus related to the performance of the practical
+
+2) The DPDAC N=1,2,4
+( i=1 Ai×Bi+∑M=1,2
+
+j=1 Cj) is proposed workloads. Assuming that RP is the ratio of computation of
+
+and can be configured to perform both single-path and the whole algorithms of the dedicated format, the runtime T
+
+dual-path operations. One DP FMA or one DPDAC of can be calculated as follows:
+⎛ ⎞
+
+lower formats can be performed in single-path execution, ∑
+while parallel operations for SP addition and 2-term SP T = ⎝ RP⎠. (4)
+or TF32 dot-product or 4-term HP or BF16 dot-product P∈ N
+
+(DP,SP,TF32,HP,BF16 P
+)
+
+are supported in dual-path execution. Based on the runtime, we obtained the unified performance
+3) The NPCv operations facilitate the conversion of num- Pu as follows:
+
+bers to higher or lower precision formats in mixed-
+precision algorithms. The low-to-high conversion is Pu = 1/T. (5)
+implemented in accordance with the dataflow of the
+proposed architecture, while high-to-low conversion is By using iterative methods, the area of the multiplier can be
+achieved by setting the value of operands in mixed- reduced by a factor of the number of iterations. This, in turn,
+precision operations. reduces the area of the entire design in proportion to the area
+
+In the proposed design, the supported DPDAC can be of the multiplier. The ratio of the multiplier area in the whole
+leveraged to significantly improve the throughput and reduce design is denoted as Rmul, then we calculate the area (A) in a
+rounding errors for practical HPC-enabled AI workloads. scaled format as follows:
+For instance, the FFT butterfly architecture [28] requires a A = Rmul/Niter + (1 − Rmul). (6)
+2-term dot-product, and more terms of products need to be
+accumulated in CONV and GEMM. Compared to the serial By increasing the iteration times, we can reduce the area of
+computations in FMA units, the throughput is significantly the proposed design at the cost of performance. We define
+
+Authorized licensed use limited to: International Institute of Information Technology Bangalore. Downloaded on January 27,2026 at 12:38:41 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+
+TAN et al.: LOW-COST FLOATING-POINT DOT-PRODUCT-DUAL-ACCUMULATE ARCHITECTURE 685
+
+(a) (b)
+
+Fig. 4. Performance/Area under different iteration times in HPC and AI
+field. (a) DP and SP operations in HPC filed. (b) SP and HP operations in AI
+filed.
+
+an index, PA, to evaluate the methods based on the ratio of
+performance and area
+
+PA = Pu
+. (7)
+
+A
+In the proposed design, the iteration times are determined
+
+by the highest precision format, i.e., DP format, which con-
+strains the throughput for SP, TF32, HP, and BF16 operations.
+To evaluate the iteration times, we select typical scenarios
+using DP and SP operations in the HPC field and SP and
+HP operations in the AI field. We analyze the iteration times
+with performance/area by adjusting the ratio of these two for-
+mats and plot the results in Fig. 4. We set the Rmul to 0.7, Fig. 5. Datapath of the proposed arithmetic architecture.
+
+which is approximately the ratio of the multiplier area in the
+conventional FP FMA unit. As illustrated in Fig. 4, we deter-
+mined that two iteration times is the optimal choice for various through a 4-to-2 CSA and adders. The calculation for the com-
+scenarios. plement of the addition result and the prediction for the leading
+
+zero numbers by using LZAC are also performed in parallel.
+
+C. Dataflow of the DPDAC Architecture At the last pipeline stage, the logic for normalization, expo-
+nent adjustment, rounding, NPCv, and output result processing
+
+The proposed DPDAC architecture utilizes segmentation are contained.
+hardware vectorization methods to optimize performance, such The proposed DPDAC utilizes low-power techniques, such
+as throughput and latency, while minimizing area and power as gating the clock in the second pipeline stage for DP
+consumption. The logic is divided into four parts based on operations to reduce energy costs, resulting in a latency of
+the bitwidth of input operands to meet the demands of par- three clock cycles compared to four clock cycles for other
+allel computing. To manage the segmentation of hardware, operations. Additionally, the multiplier array can be gated in
+three control modes (PD_Mode, PD2_Mode, PD4_Mode) are low-precision multiplications. Furthermore, if input operands
+employed, which are determined by the number of parallel are invalid, the values of the pipeline registers are retained,
+products. thus avoiding the toggle of Flip-Flops and reducing power
+
+The diagram of the proposed DPDAC architecture, illustrat- consumption.
+ing the details of the proposed DPDAC datapath, is shown in The design is controlled by a 3-bit signal, Prec, support-
+Fig. 5. The whole datapath consists of four pipeline stages, ing five formats (DP, SP, HP, TF32, and BF16). A 4-bit
+each corresponding to a different stage of the extended func- signal, Valid, enables the splitting of 64-bit operands into
+tionalities. In the first stage, processing for the input data is four 16-bit sections, while a 1-bit signal, Cvt, enables the
+implemented, wherein the components of the operands are NPCv. Furthermore, the Para signal regulates single-path and
+checked, extracted, and rearranged. The multiple-precision dual-path execution.
+multiplier, the logic for processing the sign and exponent, and
+the alignment shifter with its corresponding shifting control
+logic are also included. The second pipeline stage contains the D. Steps of the DPDAC Implementation
+logic for adding the products generated by the parallel multi- The details of the implementation of the simplified DPDAC
+plication operations in the first pipeline stage. The adder and are presented in Algorithm 1, which comprises nine steps
+the alignment shifter are used to align the products, and then corresponding to the datapath of the proposed architecture.
+generate the carry-save format products. The third pipeline In addition to the function logic, a clock counter (Cnt) is
+stage merges the product of A×B and the aligned C operands designed to calculate the cycles and control the data selection
+
+Authorized licensed use limited to: International Institute of Information Technology Bangalore. Downloaded on January 27,2026 at 12:38:41 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+
+686 IEEE TRANSACTIONS ON COMPUTER-AIDED DESIGN OF INTEGRATED CIRCUITS AND SYSTEMS, VOL. 43, NO. 2, FEBRUARY 2024
+
+Fig. 6. Vector data formats for input vectors. White blocks represent unused bits (set to “0”).
+
+(a) (b) (c)
+
+Fig. 7. Construct of the proposed multiple-precision multiplier array. (a) Organization of the multiplier array. (b) Dataflow of the multiple-precision multiplier
+array. (c) Active multiplier in different modes.
+
+of the multiplier array. As illustrated in Algorithm 1, steps 1 used for PD4_mode, segment 1 used for both PD4_mode and
+to 5 are modified significantly to support DPDAC, while steps PD2_mode, and segment 3 applicable for all modes. To reduce
+6 to 8 are similar to a conventional FP FMA implementation. power consumption, these unified vector formats are enabled
+Steps 1 to 3 are executed in parallel in pipeline stage 1 to by a 4-bit signal Valid. If one bit in Valid is zero, the corre-
+reduce latency, and the alignment shifting in step 4 is placed sponding segment maintains its previous value to avoid invalid
+in pipeline stage 1 and pipeline stage 2 for product shifting and toggle of flip-flops.
+addend shifting, respectively. The dual-path addition in step 5
+is located in pipeline stage 3 to support parallel operations B. Floating-Point Multiple-Precision Multiplier Array
+for dot-product and addition by reusing the adder. In steps 6 The proposed multiplier array performs the multiplication of
+to 8, there are minor modifications in bitwidth and datapath the unified mantissa vectors, enabling multiple-precision mul-
+compared to a conventional FP FMA implementation. Step tiplication for the supported modes. To reduce the hardware
+9 merges the NPCv and, using a conventional method, obtains cost of the proposed DPDAC architecture, iteration meth-
+the exponent before subtracting the base value of the expo- ods are employed to tradeoff performance and area of the
+nent difference between the higher and lower formats. Finally, proposed multiplier array. Consequently, DP multiplication
+the processed sign, exponent, and mantissa are combined to is implemented every other cycle utilizing recursive meth-
+generate the final result. ods, while other lower precision multiplications are executed
+
+in a pipelined fashion. As illustrated in Fig. 7, the man-
+IV. CIRCUIT IMPLEMENTATION OF THE tissa of the operands A and B have been organized into
+
+PROPOSED DPDAC ARCHITECTURE 56-bit unified vectors and split into four segments to meet
+
+A. Input Operands Processing the parallel requirements of the supported modes. The man-
+tissa multiplication for different modes can be represented
+
+To support multiple-precision operations in the proposed as follows:
+DPDAC architecture, the 64-bit input operands are decoded
+into three unified vector formats that gather the sign, exponent, PDmode : {a1, a0} × {b1, b0} + {{a3, a2} × {b3, b2}} << 56
+and mantissa components for each supported vector element + {{a1, a0} × {b3, b2} + {a3, a2} × {b1, b0}} << 28
+format. As illustrated in Fig. 6, each operand of the DPDAC PD2mode : {{a3, a2} × {b3, b2}, {a1, a0} × {b1, b0}}
+corresponds to a 92-bit vector format, comprising a 4-bit
+
+PD4mode : {a3 × b3, a2 × b2, a1 × b1, a0 × b0} (8)
+sign vector, a 32-bit exponent vector, and a 56-bit mantissa
+vector. In the adopted formats, bits that are unnecessary to where the ai and bi refer to one 14-bit segment in the unified
+represent vector element values are set to “0.” Each vector vectors. Based on (8), a 14×14 multiplier is used as the basic
+consists of four segments, with segment 0 and segment 2 only component to construct the whole multiplier array. To reduce
+
+Authorized licensed use limited to: International Institute of Information Technology Bangalore. Downloaded on January 27,2026 at 12:38:41 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+
+TAN et al.: LOW-COST FLOATING-POINT DOT-PRODUCT-DUAL-ACCUMULATE ARCHITECTURE 687
+
+Algorithm 1: Multiple-Precision DPDAC Algorithm organized into an array to perform {ai+1, ai}×{bi+1, bi} corre-
+Input: A, B, C (64-bit); Prec(3-bit); Cvt, Para(1-bit); sponding to a 28-bit multiplication. Due to the zero padding in
+
+∑
+Output: D = N=1,2,4
+
+( i=1 Ai × Bi +∑M=1,2
+j=1 Cj) the unified vector of mantissa, the product contains variable
+
+1 Initial: Cnt[31:0] = 32’b0 // Cycle Counter number of zeros in different modes, as shown in the white
+2 Repeat: Step 1 ∼ Step 9, Cnt = Cnt + 1 region of the products. Fig. 7(b) illustrates the dataflow of the
+3 Step 1: Input Data Processing begin whole multiplier array. Due to the use of iteration methods, DP
+4 (DP, SP, TF32, HP, BF16) = Decode(Prec[2:0]) multiplication is performed every clock cycle with a latency
+5 (Sign[3:0], Exp[34:0], Man[52:0]) =
+
+Data_Extract(Input_Operands) of two cycles, while other lower precision multiplications are
+6 end implemented in a pipelined manner. A turning signal Cnt[0]
+7 Step 2: Mantissa Multiplication begin extracted from the clock counter is used to control the data
+8 if Prec == DP then selection of the input vectors and the results. Only when Cnt[0]
+9 ManB[52:0] >> 27 if Cnt[0] = 1’b1 is “1,” the final result is generated in performing DP mul-
+
+10 PdDP0[79:0] = ManA[52:0] × ManB[26:0]
+11 PdDP[107:0] + = PdDP0 << 27 if Cnt[0] = 1’b1 tiplication. Fig. 7(c) shows the position of the basic 14-bit
+12 else multiplication to implement the whole 56-bit multiplication.
+13 PdSP0[53:0] = ManA[26:0] × ManB[26:0] As the proposed multiplier consists of eight basic components,
+14 PdSP1[51:0] = ManA[52:27] × ManB[52:27] the 16 multiplications are performed in a recursive way over
+15 end two consecutive clock cycles. The gray block indicates the
+16 {Pd3[25:0], Pd2[27:0], Pd1[27:0], Pd0[27:0]} =
+
+{PdSP1[51:0], PdSP0[53:0]} corresponding multiplication is performed in cycle 0, while
+17 end the operations in blue block are implemented in cycle 1. The
+18 Step 3: Alignment Shifter Count begin results of these two cycles need to be added to generate the
+19 ExpABMax = Maximum(AB3, AB2, AB1, AB0) whole result of DP multiplication.
+20 ExpCMax = Maximum(C1, C0)
+21 ASCPdi = In the design of the multiplier array, the low-power technol-
+
+ExpABi - ExpABMax (i = 0 ∼ 3)
+22 ASC_TCj = ExpABMax - ExpCj - (2 × ExpAB ogy is employed to reduce energy consumption. For example,
+
+base -
+ExpCbase) + (ManC + 3) (j = 0, 1) Multiplier 1 and Multiplier 2 can be gated in low-precision
+
+23 ASCCj = ((ASCC1 and ASCC0) > 0 and (Para == 0))? multiplications to reduce power consumption, as shown in
+ASC_TCj : (ExpCmax- ExpCj) (j = 0, 1) Fig. 7(a).
+
+24 end
+25 Step 4: Alignment Shifting begin
+26 ShtRPdi = Pdi >> ASCPdi // Stage 2 C. Alignment Shifter
+27 ShtRC1 = (Zeropad , ManC[162:81]) >> ASCC1 In both pipeline stage 1 and pipeline stage 2, alignment
+28 Datapad = DP ? ManC[162:81]: Zero shifters are required to align the addends and the products,
+29 ShtRC0 = (Datapad , ManC[80:0]) >> ASCC0 respectively. The alignment shifting method applied in the
+30 ShtRC = {ShtRC1 , ShtRC0 } // for DP FMA
+31 end proposed design is similar to our previous work [26]. In
+32 Step 5: Dual-Path Addition begin pipeline stage 1, the alignment shifter works in parallel with
+33 (SumPd , CarryPd) = CSA4-2(ShtRPdi , i = 0 ∼ 3) the mantissa multiplier to reduce the latency. As in a conven-
+34 (ASum, ACarry) = CSA4-2(SumPd , CarryPd , ShtRC1 , tional design, the mantissa of C is initially placed 2 bit to the
+
+ShtRC0) // for DPDAC left of the carry save format product, and the maximum align-
+35 Addh = ShtRC[162:108] + 1’b1 // for DP FMA
+36 Addl1 = ASum[107:54] + ACarry[107:54] ment amount is reached when the MSB of C is placed 2 bit
+37 {A0Sum, A0Carry} = Selection({A0 to the right of the LSB of the product. However, a C-bit carry
+
+Sum,
+A0Carry},{ShtRC1 , ShtRC0 }) may be generated in dot-product operations, so the mantissa
+
+38 Addl0 = A0Sum[53:0] + A0Carry[53:0] //Reused of C is placed (2+C) bit to the left of the carry save format
+39 Addrslt = Complement({Addh, Addl1, Addl0}) product in the proposed design, as shown in Fig. 8.
+40 end The bitwidth of mantissa C and mantissa A/B is Mq-bit and
+41 Step 6 ∼ 8: LZAC, Normalization, Rounding
+42 Step 9: Exponent Processing begin Mp-bit, respectively. In normal FMA operations, all operands
+43 Exp1 = Exp- (ExpCbase - ExpABbase) //NPCv are in the same precision, Mq = Mp, while the precision of
+44 Exp0 = ExpCmax - LZC //For Dual-Path addend C is higher than that of the multiplier operands A/B
+45 end in mixed-precision operation, where Mq > 2 × Mp. The shift-
+46 RsltPrec = {Sign, Exp[Wexp–1:0], Man[Wman-1:0]} ing operation is controlled by the ASC, whose value can be
+
+calculated as follows:
+
+ASC = d − const = (Ec − Eb − Ec + 2p0 − p1) − const. (9)
+hardware cost, a radix-4 modified Booth multiplier [29] is
+employed to implement the 14×14 multiplication. The 14-bit In (9), the const is introduced based on the initial position
+multiplier operand is padded with 1-bit zero after the LSB and offset between ManC and ManA × ManB. To accommodate
+2-bit zero before the MSB, then the resulting 17-bit vector is the shifting requirements of all supported formats, a 163-bit
+divided into eight 3-bit encode groups to generate eight partial alignment shifter is designed in the proposed design.
+products. These eight partial products are merged by two lev- In the proposed alignment shifter, the mantissa of addend
+els of 4-to-2 CSA and a CPA, then generating the product PPi C is rearranged into a unified format to enable resource shar-
+for ai × bi. As shown in Fig. 7(a), every four multipliers are ing among all modes, as shown in Fig. 9. The mantissa of
+
+Authorized licensed use limited to: International Institute of Information Technology Bangalore. Downloaded on January 27,2026 at 12:38:41 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+
+688 IEEE TRANSACTIONS ON COMPUTER-AIDED DESIGN OF INTEGRATED CIRCUITS AND SYSTEMS, VOL. 43, NO. 2, FEBRUARY 2024
+
+(a)
+
+(b)
+
+(c)
+
+Fig. 10. Calculation of the ASCs for the alignment of the products.
+(d)
+
+Fig. 8. Alignment for the addends of the proposed DPDAC architecture.
+(a) Alignment of products in DPAC. (b) Alignment of C operand in DPDAC.
+(c) Alignment of C operand in standard FMA operation. (d) Alignment of C
+operands in dual-path execution.
+
+(a)
+
+(b)
+
+Fig. 9. Unified format of the input vectors of the alignment shifter. (a) Unified
+addend format of the alignment shifter. (b) Unified product format of the
+alignment shifter.
+
+each format is extended with zeros to fill the required shifting Fig. 11. Datapath of the adder and LZAC.
+
+bitwidth. The unified vectors are right aligned, so that the bit
+shifted out of the shifter can be used to generate the partial
+sticky bit. For the alignment of addends, an 8-level alignment to control the shifting for the four products. In 2-term oper-
+
+shifter is needed to meet the shifting requirement of DP opera- ations, only Pd0 and Pd3 need to be added and the ASC2 is
+
+tion. The shifting operations are controlled by ASC calculated used to implement the shifting of the two products.
+
+by the exponent difference module and the control mode signal The bitwidth of the alignment shifter is Mq + 3, so a 27 or
+
+Ctrl_M. If the corresponding bit of ASCs is one, right shifting 56 bit alignment shifter is required for the SP or DP addition,
+
+is performed, otherwise the input is selected as the aligned respectively. In the proposed design, four 27-bit alignment
+
+result directly. The ASC vector is divided into two parts cor- shifters are designed in pipeline stage 2, but only three align-
+
+responding to the control of the shifting of two addends C ment shifters work at any given time due to the maximum
+0
+
+and C1. In level 0–level 6, two smaller alignment shifters run product always staying in the initial position. However, com-
+
+independently and generate two aligned results for PD2_mode pared to using three alignment shifters, our method can save
+
+and PD4_mode. Then, the generated two aligned results are a significant number of multiplexers which are used to select
+
+combined, and one 163-bit shifter cell is placed which is con- the shifting number and ASCs for alignment shifters.
+
+trolled by the ASC3 for PD_mode in the last level. Moreover,
+the shifted out bits in the right of the shifter cell are used to D. Datapath of Addition and Leading Zero Anticipation
+generate the sticky bit, which will be added in the adder. The alignment of addend C has been performed, and the
+
+In 2-term or 4-term DPDAC, two or four products are gen- generated 163-bit vectors need to be added with the products
+erated by the multiplier array in pipeline stage 1, respectively. of mantissa multiplication A×B. The datapath of the addition
+The smaller products are aligned based on the exponent dif- and LZAC are shown in Fig. 11. In pipeline stage 2, the gen-
+ference of products in pipeline stage 2. As shown in Fig. 10, erated products are added by a 4-to-2 CSA and a 3-to-2 CSA.
+the exponent difference of products (Pd0–Pd3) are calculated In 4-term DPDAC, only the 4-to-2 CSA works to sum up these
+and four ASCs (ASC0–ASC3) are generated by using four sub- four products, while these two CSAs are combined together
+tractors. The sign (S0, S1, and S2) of subtractors is used to to perform the addition of the 2-term DPDAC. The carry and
+select the ASCs for products. In 4-term operations, four prod- sum generated by pipeline stage 1 and stage 2 are selected
+ucts need to be added together, and ASC0–ASC3 are applied by the signal DP, which is used to enable DPmode. Then,
+
+Authorized licensed use limited to: International Institute of Information Technology Bangalore. Downloaded on January 27,2026 at 12:38:41 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+
+TAN et al.: LOW-COST FLOATING-POINT DOT-PRODUCT-DUAL-ACCUMULATE ARCHITECTURE 689
+
+the selected carry and sum are added together with these two
+aligned addends C0 and C1 by a 4-to-2 CSA. We employed a
+163-bit adder to implement the addition of the 163-bit input
+vector. In PD_mode, the addition is split into two parts in
+pursuit of lower cost. For the most significant 55 bit, an incre-
+menter is applied since only one of the two vectors contains
+useful data. For the less significant 108 bit, the input vectors
+need to be added using a CPA. The generated result of the
+incrementer and the initial input vector at the higher 55 bit are
+selected by the carry of the lower 108-bit CPA, and combined
+with the CPA result to generate the addition results. Due to the
+163-bit aligned addend being split into two narrower vectors
+in PD2_mode and PD4_mode modes, only the lower 108-bit
+CPA is used and the incrementer is gated to save energy con-
+sumption. The sign of the result of the DPDAC architecture is Fig. 12. Exponent processing with the support of NPCv.
+determined by the addition result. Specifically, if the addition
+result is negative, the sign of addend C is selected and the is generated after addition, 1-bit left shifting is performed for
+complement is performed for the addition result. Otherwise, mantissa and the exponent should be adjusted to add one.
+the sign of product A × B is selected and the addition result
+is outputted directly.
+
+In order to reduce the latency of the proposed DPDAC dat- F. Output Processing
+apath, the leading zero anticipation is implemented in parallel The sign, exponent, and mantissa are processed in the
+with the addition. As both positive results and negative results preceding pipeline stages, respectively, and they need to be
+can be generated by addition, both leading zeros and leading combined again to generate the final results. However, in order
+ones need to be anticipated. In this article, the general case to deal with the subnormal number and NPCv, some extra
+indicator presented in [30] is used. The LZAC generates a operations are required to process the exponent and mantissa.
+7-bit signal LZC_amount to perform normalization, but 1-bit For the processing of mantissa, the mantissa is right aligned
+error may occur and the modification is needed in the later to the LSB position after rounding, we only need to remove the
+steps. implicit bit conventionally. For the processing of the exponent,
+
+the predicted value of the exponent is calculated in pipeline
+stage 1. However, the normalization, the rounding carry, and
+
+E. Normalization and Rounding the NPCv are not considered, so the predicted exponent needs
+The normalization shifter is applied to remove the leading to be adjusted accordingly.
+
+zeros of addition, the architecture of the proposed normal- The exponent processing is performed in parallel with the
+ization shifter is similar to the alignment shifter, albeit more normalization and rounding to reduce latency, and the data-
+simple. Compared to an alignment shifter, the normalization path is shown in Fig. 12. The shifting amount generated by
+shifting is a left shifting, and the left shifted out bits can LZAC and the fixed zero numbers determined by the leading
+be discarded directly. In the normalization shifter, one more one region need to be considered to obtain the real leading
+final level shifting is added for correcting the error gener- zero numbers. In PD_mode, the whole 163-bit adder is used,
+ated by the LZAC. If the leading bit is detected and when so the leading one locates in the LSB 108 bit, generating 53
+it is not one after shifting, 1-bit more left shifting is per- fixed zeros. In PD2_mode and PD4_mode, no fixed zeros are
+formed. After shifting, the normalization results are generated generated due to only the LSB 108 bit of adder being used.
+and then need to be rounded to generate the mantissa. In Moreover, the processing for NPCv is also implemented. Since
+the proposed design, roundTiesToEven, the default rounding the base value of exponent in the supported precisions may
+mode in IEEE 754-2008, is implemented for the supported differ, the difference between the aimed format and addition
+operations. format needs to be calculated. The fixed leading zero numbers
+
+Moreover, the NPCv is supported in the proposed design, the and the difference of the exponent base value are combined
+high-precision results need to be converted to lower precision by using a multiplexer. Then, the shifting amount, the pre-
+numbers before outputted to meet the datatype transform dicted exponent, and the combined output generated by the
+requirement of mixed-precision algorithms. Specifically, the multiplexer are added by using a 3-to-2 CSA and an adder.
+conversion operations, DP > SP, SP > TF32, SP > BF16, SP Since the shifting amount prediction error lza_error detected
+> HP, are required, which are controlled by the input signal by normalization and the rounding carry round_cin generated
+Cvt. The rounding position is fixed, which is the LSB position after rounding arrive later, the processing for them is per-
+of the aimed precision. Therefore, the bits required to perform formed after addition to avoid a critical path. lza_error = 1
+rounding, the LSB, the rounding bit, and the sticky bit, can means 1-bit more left shifting is performed, so the exponent
+be generated easily. needs to subtract one, and the round_cin = 1 means the carry
+
+The carry of rounding needs to be added to the LSB position is generated and adding one is necessary. After NPCv, the
+of the aimed formats to generate the final mantissa. If the carry M-bit wider exponent of the high-precision result has been
+
+Authorized licensed use limited to: International Institute of Information Technology Bangalore. Downloaded on January 27,2026 at 12:38:41 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+
+690 IEEE TRANSACTIONS ON COMPUTER-AIDED DESIGN OF INTEGRATED CIRCUITS AND SYSTEMS, VOL. 43, NO. 2, FEBRUARY 2024
+
+TABLE II TABLE III
+DELAY, AREA, AND POWER COMPARISON WITH CONV-DP UNIT FUNCTIONALITIES AND OVERHEAD COMPARISON
+
+WITH SINGLE-MODE FP FMA UNITS
+
+processed into an N-bit narrower exponent, and overflow may to the CONV-DP implementation, it supports a broad range of
+occur in the processing. In the proposed design, saturation formats and a greater variety of operations, such as DPDAC,
+overflow processing is applied in exponent adjustment. If the NPCv, and dual-path execution.
+(M − N)-bit of MSB in the exponent is not zeros, the expo-
+nent is set to the maximum value that the aimed precision can C. Comparisons With Single-Mode Discrete Designs
+represent, otherwise the N-bit of LSB is truncated directly. The proposed DPDAC architecture supports multiple for-
+
+Finally, the exponent vector and mantissa vector are ORed mats and various operations for HPC and AI algorithms,
+together and the sign bit is added into the MSB position to providing a more efficient solution than discrete designs that
+form the final FP result. utilize multiple single-mode FP units to achieve the same func-
+
+tionalities. To compare, single-mode FMA units for DP, SP,
+V. EVALUATION TF32, and HP formats were designed and synthesized under
+
+the same constraints of the proposed design. The architec-
+A. Methodology ture of these single-mode units is simpler due to the support
+
+The model of the proposed DPDAC architecture is imple- of fewer functions or narrower bitwidth of operands, result-
+mented using a structural-level Verilog HDL code. To verify ing in a smaller area than the proposed one, as shown in
+the functionalities, extensive testing vectors are generated with Table III. These single-mode FP units can perform one mul-
+the help of TestFloat [31], and a customized software model is tiplication and one addition per clock cycle, whereas the
+also designed using C language to verify the TF32 and BF16 proposed architecture can support 2–9 operations (OPs) for
+operations. Moreover, we trained the DNN model ResNet- specific formats. Therefore, multiple single-mode FP units are
+50 [32] in Caffe2 by using GPU V100, and then extracted the required to realize the same functionalities. Table III indicates
+intermediate values of some CONV layers. The extracted data that the combination of these discrete designs consumes 155%
+can not only be used as the test vectors to verify the correctness more area than the proposed one while being able to realize
+but also to evaluate the power consumption for the proposed the same functionalities.
+arithmetic unit. The verification of the proposed design is
+implemented using SystemVerilog, which can ensure the cor- D. Comparisons With Previous Multiple-Precision Works
+rectness and provide real-time comparisons for each pipeline
+
+Table IV presents a comparison of the functionality and
+stage. For comparison purposes, we also designed single-mode
+
+performance of the proposed DPDAC with previous works.
+FP FMA units employing conventional architecture for the
+
+The proposed DPDAC not only supports DP and SP formats
+supported formats.
+
+for HPC workloads, but also provides support for reducing
+formats, such as TF32, BF16, and HP, which are suitable
+
+B. Synthesis Results and Analysis for DNN workloads. Furthermore, the DPDAC architecture
+All designs are synthesized using the 28-nm CMOS tech- enables various types of operations, including standard FMA,
+
+nology at the TT process corner, to measure the performance dot-product, addition, and dual-path execution. Additionally,
+and area, the dynamic power is measured by using the real test the incorporation of the NPCv operation in the DPDAC
+vectors with the help of Static Timing Analysis (STA) tools. architecture facilitates the conversion of data formats in mixed-
+The proposed DPDAC unit and conventional DP (CONV-DP) precision algorithms.
+FMA unit are synthesized under the worst case delay, 0.68 As shown in Table IV, multiple-precision has been
+and 0.60 ns, respectively, their area and power are shown exploited in previous works. The dual-mode designs presented
+in Table II. Compared to the CONV-DP unit, the proposed in [13], [14], and [15] support one DP FMA and two par-
+design only consumes 6.5% more area and 5.0% more power. allel SP FMA per clock cycle, which are commonly uti-
+The increased overhead is primarily attributed to the pipeline lized in traditional HPC systems. However, the utilization
+stage 2, which includes the logic for shifting and adding prod- of DP and SP operations can incur a significant compu-
+ucts, as well as the dual-path for enabling parallel execution of tational overhead when executing deep learning workloads.
+DPDAC and addition. Pipeline stage 1 consumes less overhead In addition to supporting standard FMA operations for DP
+than the CONV-DP due to the iterative methods employed formats, the designs in [25] and [33] support 2-term dot-
+in the design of the multiplier array. Despite the increased product-accumulate (DPAC) for lower formats. The differ-
+resource requirements of the proposed design in comparison ence is that the 2-term DPAC in [25] is implemented using
+
+Authorized licensed use limited to: International Institute of Information Technology Bangalore. Downloaded on January 27,2026 at 12:38:41 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+
+TAN et al.: LOW-COST FLOATING-POINT DOT-PRODUCT-DUAL-ACCUMULATE ARCHITECTURE 691
+
+TABLE IV
+COMPARISON OF FUNCTIONALITY WITH PREVIOUS MULTIPLE-PRECISION FMA DESIGNS
+
+mixed-precision methods, while all operands are of the same The design in [35] proposed a multiformat FP architecture
+precision in [33]. The 2-term DPAC is useful in perform- supporting both scalar and vector operations for each format.
+ing digital signal processing applications such as FFTs. Our Compared to other multiple-precision designs, it achieves bet-
+proposed 4-term DPDAC can be viewed as an extension of ter energy efficiency scaling thanks to the parallel datapaths
+the 2-term DPAC, but the need to efficiently sum four terms approach. However, in most HPC and deep learning algo-
+is significantly more difficult than the 2-term case. FPMax [34] rithms, the vector operations in [35] may incur performance
+features separate implementations of the FMA operation for loss in performing dot-product operations, such as GEMM,
+DP and SP without any datapath sharing, targeting high-speed FFT, and CONV.
+ASICs. It is efficient in performing FMA operations for spe- These previous works are synthesized under different semi-
+cific formats, but not suitable for HPC and AI algorithms with conductor technologies. Although the previous work [36]
+versatility in data formats. In addition to DP and SP formats, proposed scaling equations for comparing designs across fabri-
+the designs in [16] and [25] support HP format to efficiently cation technologies, but it lacks consideration of the difference
+accelerate deep learning workloads. The work [16] design an of cell library provided by various semiconductor manufac-
+FP dot-product unit for HPC and AI converged computing. It turers. Moreover, the signal activity of the test vectors of
+fully exploits the hardware utilization of the multiplier array, these works is also different in power measurement, mak-
+then significantly improves the performance of SP and HP ing it challenging to make a fair comparison between the
+operations. However, it requires a higher bandwidth to pro- overhead of the proposed design and that of previous works.
+vide data for the input operands. The proposed one achieves However, the architectures in [13], [14], [25], [33], and [34]
+higher Byte/OP than the design in [16] due to the support of are also designed by modifying a CONV-DP FMA (baseline
+additions. Moreover, when using the dot-product unit proposed design, Base). Hence, a relative comparison that computes
+by [16] to construct a computing system, independent adders the increased overhead on the basis of a CONV-DP FMA
+are required to sum up the result generated by the dot- is suitable for these designs, as shown in Table V. The
+product unit, which will significantly increase hardware cost. designs in [34] optimized to minimize the latency use a
+
+Authorized licensed use limited to: International Institute of Information Technology Bangalore. Downloaded on January 27,2026 at 12:38:41 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+
+692 IEEE TRANSACTIONS ON COMPUTER-AIDED DESIGN OF INTEGRATED CIRCUITS AND SYSTEMS, VOL. 43, NO. 2, FEBRUARY 2024
+
+TABLE V
+OVERHEAD COMPARISON OF THE PROPOSED [2] T. Kurth et al., “Exascale deep learning for climate analytics,” in
+
+DESIGN WITH PREVIOUS WORKS Proc. Int. Conf. High Perform. Comput., Netw., Storage Anal., 2018,
+pp. 649–660.
+
+[3] S. Wang, J. Cao, and P. S. Yu, “Deep learning for spatio-temporal
+data mining: A survey,” IEEE Trans. Knowl. Data Eng., vol. 34, no. 8,
+pp. 3681–3700, Aug. 2022.
+
+[4] A. C. I. Malossi et al., “The transprecision computing paradigm:
+Concept, design, and applications,” in Proc. Design, Autom. Test Europe
+Conf. Exhibition (DATE), Mar. 2018, pp. 1105–1110.
+
+[5] U. Köster et al., “Flexpoint: An adaptive numerical format for efficient
+training of deep neural networks,” in Proc. Adv. Neural Inf. Process.
+Syst., vol. 30, 2017, pp. 1–14.
+
+[6] N. P. Jouppi et al., “In-datacenter performance analysis of a tensor pro-
+cessing unit,” in Proc. 44th Annu. Int. Symp. Comput. Archit., 2017,
+pp. 1–12.
+
+[7] S. Xie et al., “Extreme datacenter specialization for planet-scale com-
+cascade multiply-add with a Wallace tree to sum up the par- puting: ASIC clouds,” ACM SIGOPS Oper. Syst. Rev., vol. 52, no. 1,
+tial products. So it has a shorter latency than the baseline pp. 96–108, 2018.
+
+[8] A. Haidar, S. Tomov, J. Dongarra, and N. J. Higham, “Harnessing
+design, but more area and power are needed. The designs GPU tensor cores for fast FP16 arithmetic to speed up mixed-precision
+in [13], [14], [25], and [33] modify the architecture of a iterative refinement solvers,” in Proc. Int. Conf. High Perform. Comput.,
+CONV-DP FMA to support multiple-precision operations by Netw., Storage Anal., 2018, pp. 603–613.
+
+[9] P. Micikevicius et al., “Mixed precision training,” 2017,
+sharing the circuit, but they significantly increase the over- arXiv:1710.03740.
+head. Compared to prior works, the proposed design supports [10] J. Langou, J. Langou, P. Luszczek, J. Kurzak, A. Buttari, and
+a wider range of reducing formats (e.g., TF32 and BF16), J. Dongarra, “Exploiting the performance of 32 bit floating point arith-
+
+which are efficient for deep learning tasks and enable addi- metic in obtaining 64 bit accuracy (revisiting iterative refinement for
+linear systems),” in Proc. 2006 ACM/IEEE Conf. Supercomput., 2006,
+
+tional comprehensive operations, such as DPDAC, NPCv, and p. 50.
+dual-path execution. Moreover, due to iterative techniques, the [11] A. Poulos, S. A. McKee, and J. C. Calhoun, “Posits and the state
+proposed design exhibits lower relative overhead compared to of numerical representations in the age of exascale and edge comput-
+
+ing,” Softw. Pract. Exp., vol. 52, no. 2, pp. 619–635, 2022.
+a typical DP FMA implementation. [12] D. Kalamkar et al., “A study of BFLOAT16 for deep learning train-
+
+ing,” 2019, arXiv:1905.12322.
+VI. CONCLUSION [13] L. Huang, L. Shen, K. Dai, and Z. Wang, “A new architecture for
+
+multiple-precision floating-point multiply-add fused unit design,” in
+In this article, we proposed a DPDAC architecture that can Proc. 18th IEEE Symp. Comput. Arithmetic (ARITH), 2007, pp. 69–76.
+
+efficiently handle a variety of FP operations, enabling trans- [14] K. Manolopoulos, D. Reisis, and V. A. Chouliaras, “An efficient multiple
+precision computing for HPC and AI workloads. The proposed precision floating-point multiply-add fused unit,” Microelectron. J.,
+
+vol. 49, pp. 10–18, Mar. 2016.
+architecture can be configured to perform various operations, [15] V. Arunachalam, A. N. J. Raj, N. Hampannavar, and C. Bidul,
+such as FMA, addition, dot-product, and so on, by setting the “Efficient dual-precision floating-point fused-multiply-add architec-
+value of operands. The proposed architecture supports both ture,” Microprocess. Microsyst., vol. 57, pp. 23–31, Mar. 2018.
+
+single-path and dual-path execution. In single-path execution, [16] W. Mao et al., “A configurable floating-point multiple-precision process-
+ing element for HPC and AI converged computing,” IEEE Trans. Very
+
+it can perform one standard DP FMA; or 2-term DPDAC for Large Scale Integr. (VLSI) Syst., vol. 30, no. 2, pp. 213–226, Feb. 2022.
+SP and TF32 formats; or 4-term DPDAC for HP and BF16 for- [17] J. Sohn and E. E. Swartzlander, “A fused floating-point four-term dot
+mats. In dual-path execution, the DPDAC operations are split product unit,” IEEE Trans. Circuits Syst. I, Reg. Papers, vol. 63, no. 3,
+
+pp. 370–378, Mar. 2016.
+into two parts that the dot-product and addition, which can [18] Z. Dan et al., IEEE Standard for Floating-Point Arithmetic, IEEE
+be performed in parallel. In addition to supporting multiply- Standard 754-2008, 2008.
+add operations, the DPDAC architecture can be modified to [19] H. Liao, J. Tu, J. Xia, and X. Zhou, “DaVinci: A scalable architecture for
+
+facilitate numerical precision conversion, thereby enabling the neural network computing,” in Proc. Hot Chips Symp., 2019, pp. 1–44.
+[20] T. Chen et al., “DianNao: A small-footprint high-throughput accelera-
+
+convenient conversion of numbers to higher or lower formats tor for ubiquitous machine-learning,” ACM SIGARCH Comput. Archit.
+to accommodate the datatype transformation in the datapath News, vol. 42, no. 1, pp. 269–284, 2014.
+
+of mixed-precision algorithms. The proposed DPDAC signif- [21] Y. Jiao, L. Han, and X. Long, “Hanguang 800 NPU—The ultimate AI
+inference solution for data centers,” in Proc. IEEE Hot Chips 32 Symp.
+
+icantly reduces the overhead compared to the discrete design (HCS), 2020, pp. 1–29.
+that utilizes multiple single-mode FP units to achieve the same [22] M. Arafa et al., “Cascade lake: Next generation Intel Xeon scalable
+functionalities. Furthermore, compared to the state-of-the-art processor,” IEEE Micro, vol. 39, no. 2, pp. 29–36, Mar./Apr. 2019.
+
+multiple-precision designs, the proposed architecture supports [23] N. Stephens et al., “The ARM scalable vector extension,” IEEE Micro,
+vol. 37, no. 2, pp. 26–39, Mar./Apr. 2017.
+
+a wide range of formats and more types of operations, such [24] M. Baboulin et al., “Accelerating scientific computations with mixed
+as DPAC and NPCv, with lower costs. The support of a broad precision algorithms,” Comput. Phys. Commun., vol. 180, no. 12,
+
+range of formats and more types of operations makes the pp. 2526–2533, 2009.
+[25] H. Zhang, D. Chen, and S.-B. Ko, “Efficient multiple-precision floating-
+
+proposed DPDAC architecture suitable for accelerating both point fused multiply-add with mixed-precision support,” IEEE Trans.
+HPC and AI applications. Comput., vol. 68, no. 7, pp. 1035–1048, Jul. 2019.
+
+[26] L. Huang, S. Ma, L. Shen, Z. Wang, and N. Xiao, “Low-cost binary128
+REFERENCES floating-point FMA unit design with SIMD support,” IEEE Trans.
+
+Comput., vol. 61, no. 5, pp. 745–751, May 2012.
+[1] G. Yi and V. Loia, “High-performance computing systems and appli- [27] N. Brunie, F. De Dinechin, and B. De Dinechin, “A mixed-precision
+
+cations for AI,” J. Supercomput., vol. 75, no. 8, pp. 4248–4251, fused multiply and add,” in Proc. Conf. Rec. 45th Asilomar Conf.
+2019. Signals, Syst. Comput. (ASILOMAR), 2011, pp. 165–169.
+
+Authorized licensed use limited to: International Institute of Information Technology Bangalore. Downloaded on January 27,2026 at 12:38:41 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+
+TAN et al.: LOW-COST FLOATING-POINT DOT-PRODUCT-DUAL-ACCUMULATE ARCHITECTURE 693
+
+[28] A. Kaivani and S. Ko, “Floating-point butterfly architecture based on Qianmin Yang received the B.S., M.S., and Ph.D.
+binary signed-digit representation,” IEEE Trans. Very Large Scale Integr. degrees in computer science and technology from
+(VLSI) Syst., vol. 24, no. 3, pp. 1208–1211, Mar. 2016. the National University of Defense Technology
+
+[29] A. D. Booth, “A signed binary multiplication technique,” Quart. J. Mech. (NUDT), Changsha, China, in 2006, 2008, and
+Appl. Math., vol. 4, no. 2, pp. 236–240, 1951. 2012, respectively.
+
+[30] M. S. Schmookler and K. J. Nowka, “Leading zero anticipation and He is currently an Assistant Professor with
+detection-a comparison of methods,” in Proc. 15th IEEE Symp. Comput. the Computer College, NUDT. His main research
+Arithmetic, 2001, pp. 7–12. interests include computer architecture, high-
+
+[31] J. Hauser. “Berkeley TestFloat.” Jan. 2018. [Online]. Available: http:// performance computing, and reconfigurable
+www.jhauser.us/arithmetic/TestFloat.html computing.
+
+[32] K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for image
+recognition,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2016,
+pp. 770–778.
+
+[33] M. Goek and M. M. Oezbilen, “Multi-functional floating-point MAF
+designs with dot product support,” Microelectron. J., vol. 39, no. 1, Li Shen received the Ph.D. degree from the
+pp. 30–43, 2008. National University of Defense Technology
+
+[34] J. Pu, S. Galal, X. Yang, O. Shacham, and M. Horowitz, “FPMax: (NUDT), Changsha, China, in 2003.
+A 106GFLOPS/W at 217GFLOPS/mm2 single-precision FPU, and a He is currently a Professor with the School of
+43.7 GFLOPS/W at 74.6 GFLOPS/mm2 double-precision FPU, in 28nm Computer Science, NUDT. He has published 40
+UTBB FDSOI,” 2016, arXiv:1606.07852. research papers, including IEEE TRANSACTIONS
+
+[35] S. Mach et al., “FPnew: An open-source multiformat floating-point unit ON COMPUTERS, IEEE TRANSACTIONS ON
+architecture for energy-proportional transprecision computing,” IEEE PARALLEL AND DISTRIBUTED SYSTEMS, Micro,
+Trans. Very Large Scale Integr. (VLSI) Syst., vol. 29, no. 4, pp. 774–787, HPCA, and DAC. His main research interests are
+Apr. 2021. image super resolution, machine learning, and
+
+[36] A. Stillmaker and B. Baas, “Scaling equations for the accurate prediction performance optimization of machine learning
+of CMOS device performance from 180nm to 7nm,” Integration, vol. 58, systems.
+pp. 74–81, Jun. 2017.
+
+Hongbing Tan received the B.S. degree from Harbin Gang Chen received the B.E. degree in biomedi-
+Engineering University, Harbin, China, in 2015, and cal engineering, the B.S. degree in mathematics and
+the M.S. degree from the National University of applied mathematics, and the M.S. degree in con-
+Defense Technology, Changsha, China, in 2017, trol science and engineering from Xi’an Jiaotong
+where he is currently pursuing the Ph.D. degree in University, Xi’an, China, in 2008, 2008, and 2011,
+computer science and technology. respectively, and the Ph.D. degree in computer sci-
+
+His research interests include computer architec- ence from the Technical University of Munich,
+ture, and hardware design for deep learning. Munich, Germany, in 2016.
+
+He is currently a Professor with Sun Yat-
+sen University, Guangzhou, China. His research
+interests include deep learning, computer vision,
+
+high-performance computing, and embedded system.
+Prof. Chen received the Best Paper Awards on DATE 2021, ICESS 2022,
+
+Libo Huang received the B.S. and Ph.D. degrees ICET 2021, ESTImedia 2014, and the Best Paper Award Candidate on
+in computer science from the National University of CODES+ISSS 2020, FPL 2022. He is an Associate Editor of the Journal
+Defense Technology (NUDT), Changsha, China, in of Circuits, Systems, and Computers.
+2005 and 2010, respectively.
+
+He was a Professor with NUDT. He has authored
+over 100 papers in internationally recognized jour-
+nals and conferences. His current research interests Liquan Xiao received the M.S. and Ph.D.
+include computer architecture, computer arithmetic, degrees in computer science and technology from
+agile hardware design, and big data system. the National University of Defense Technology
+
+(NUDT), Changsha, China, in 1994 and 1997,
+respectively.
+
+He is currently a Professor with NUDT.
+Zhong Zheng born in 1986. He received the His research interests include architecture
+Ph.D. degree in computer science and technology of high-performance computing, high-speed
+from the National University of Defense Technology interconnect network, system integration, and power
+(NUDT), Changsha, China, in 2014. management.
+
+He is currently an Assistant Professor with the
+College of Computer, NUDT. His main research
+interests include processor micro-architecture and
+high-performance computing.
+
+Nong Xiao (Senior Member, IEEE) received the
+Ph.D. degree in computer science and technology
+from the National University of Defense Technology,
+Changsha, China, in 1996.
+
+Hui Guo received the M.S. and Ph.D. degrees in In 2004, he was a Professor with the Department
+computer science and technology from the National of Computer Science. He is currently a Professor
+University of Defense Technology (NUDT), with the School of Data and Computer Science, Sun
+Changsha, China, in 2013 and 2018, respectively. Yat-sen University, Guangzhou, China. He has con-
+
+He is currently an Assistant Professor with the tributed four invited chapters to book volumes and
+College of Computer, NUDT. His research interest published more than 100 papers in archival jour-
+includes computer architecture, heterogeneous nals and refereed conference proceedings. He has
+computing, and SIMD architecture. developed many grid computing products, e.g. the monitor system of China
+
+Grid. His research interests include computer architecture, embedded system,
+grid computing, and large-scale storage.
+
+Prof. Xiao became a member of ACM in 2004.
+
+Authorized licensed use limited to: International Institute of Information Technology Bangalore. Downloaded on January 27,2026 at 12:38:41 UTC from IEEE Xplore.  Restrictions apply.

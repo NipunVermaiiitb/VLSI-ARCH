@@ -1,0 +1,61 @@
+============================================================
+Stage 1-2 Integration Testbench (Non-DP Modes)
+Data Flow: Operands â†’ Stage1 â†’ Stage2 â†’ CSA Output
+============================================================
+
+------------------------------------------------------------
+CASE: SP mode: basic two-lane precision
+INPUTS : SP: A=1.ÿÿ—2, B=ÿÿÿÃ—2, C=0.ÿÿ—2 (two SP operands per input)
+TEST : Feed through ÿÿÿ†’S2 pipeline, verify data propagates
+OUTPUT/CHECK: S2 Sum/Carry should be non-zero with valid_out=1
+S1: valid_out=1, ProdASC[31:0]=00000001
+S2: valid_out=1111, Sum[41:0]=00000000000, Carry[41:0]=00000000000
+RESULT: PASS (SP mode: basic two-lane precision)
+------------------------------------------------------------
+
+------------------------------------------------------------
+CASE: TF32 mode: two 28-bit precision lanes
+INPUTS : TF32: ÿÿ—28-bit operands with exponent fields injected
+TEST : Verify S1 processes TF32 mode ÿÿ’ S2 receives products
+OUTPUT/CHECK: S2 should show PD2 mode active
+S1: valid_out=1, PD2_mode=1
+S2: valid_out=1111, PD_mode=0
+RESULT: PASS (TF32 mode: two 28-bit precision lanes)
+------------------------------------------------------------
+
+------------------------------------------------------------
+CASE: HP mode: quad 14-bit lanes
+INPUTS : HP: ÿÿ—14-bit operands with exponent fields, all lanes valid
+TEST : Verify 4-lane processing throughÿÿÿâÿ’S2
+OUTPUT/CHECK: S2 should handle PD4 mode with 4 products
+S1: valid_out=1, PD4_mode=1, ProdASC[31:0]=00040006
+S2: valid_out=1111, PD_mode=0
+RESULT: PASS (HP mode: quad 14-bit lanes)
+------------------------------------------------------------
+
+------------------------------------------------------------
+CASE: BF16 mode: quad bfloat16 lanes
+INPUTS : BF16:ÿÿÿ—16-bit exponent fields with all lanes active
+TEST : Verify 4-lane BF16 processing through pipeline
+OUTPUT/CHECK: S2 should output aligned product results
+S1: valid_out=1, PD4_mode=1, ProdASC[31:0]=00040006
+S2: valid_out=1111, PD_mode=0
+RESULT: PASS (BF16 mode: quad bfloat16 lanes)
+------------------------------------------------------------
+
+------------------------------------------------------------
+CASE: Aligned_C carryover: addend path integrity
+INPUTS : SP mode: check Aligned_C from S1 flows to S2 output paths
+TEST : Verify addend alignment shifter output propagates correctly
+OUTPUT/CHECK: S2 dual/high paths should contain aligned addend data
+S1 Aligned_C[41:0]=00000000000 (addend C mantissa aligned)
+S2 Aligned_C_dual[41:0]=00000000000
+S2 Aligned_C_high[41:0]=00000000000
+RESULT: PASS (Aligned_C carryover: addend path integrity)
+------------------------------------------------------------
+
+============================================================
+Stage 1-2 Integration Test Summary: 0 total errors
+============================================================
+ALL INTEGRATION TESTS PASSED (6/6)
+sim\testbenches\tb_integration_stage1_stage2.v:323: $finish called at 186000 (1ps)
