@@ -1,0 +1,26 @@
+
+73. Printing statistics.
+
+=== DPDAC_top ===
+
+   Number of wires:              32326
+   Number of wire bits:          34946
+   Number of public wires:          56
+   Number of public wire bits:    2676
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              34409
+     $_ANDNOT_                   10672
+     $_AND_                       1209
+     $_DFFE_PN0P_                  600
+     $_DFF_PN0_                    669
+     $_MUX_                       4867
+     $_NAND_                       894
+     $_NOR_                       3076
+     $_NOT_                       1738
+     $_ORNOT_                     1026
+     $_OR_                        5055
+     $_XNOR_                      1176
+     $_XOR_                       3427
+

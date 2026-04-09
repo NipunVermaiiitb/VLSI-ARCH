@@ -1,0 +1,19 @@
+Design Name: Stage3_Top
+Run Directory: /openlane/designs/stage3/runs/RUN_2026.04.08_17.27.01
+----------------------------------------
+
+Magic DRC Summary:
+Source: /openlane/designs/stage3/runs/RUN_2026.04.08_17.27.01/reports/signoff/drc.rpt
+Total Magic DRC violations is 0
+----------------------------------------
+
+LVS Summary:
+Source: /openlane/designs/stage3/runs/RUN_2026.04.08_17.27.01/logs/signoff/39-Stage3_Top.lef.lvs.log
+Number of nets: 4417                       |Number of nets: 4417                       
+Design is LVS clean.
+----------------------------------------
+
+Antenna Summary:
+Source: /openlane/designs/stage3/runs/RUN_2026.04.08_17.27.01/logs/signoff/41-arc.log
+Pin violations: 55
+Net violations: 49
